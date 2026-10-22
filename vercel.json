@@ -1,9 +1,39 @@
 {
-  "rewrites": [{"source": "/_blob/:id", "destination": "/api/blob?id=:id"}],
-  "functions": {"api/ia.js": {"maxDuration": 300}},
-  "headers": [{"source": "/(.*)", "headers": [
-    {"key": "X-Frame-Options", "value": "DENY"},
-    {"key": "X-Content-Type-Options", "value": "nosniff"},
-    {"key": "Referrer-Policy", "value": "strict-origin-when-cross-origin"}
-  ]}]
+  "rewrites": [
+    {
+      "source": "/api/google-agenda/callback",
+      "destination": "/api/google-agenda?acao=callback"
+    },
+    {
+      "source": "/_blob/:id",
+      "destination": "/api/blob?id=:id"
+    }
+  ],
+  "functions": {
+    "api/ia.js": {
+      "maxDuration": 300
+    },
+    "api/google-agenda.js": {
+      "maxDuration": 60
+    }
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        }
+      ]
+    }
+  ]
 }

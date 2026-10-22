@@ -162,3 +162,73 @@ mapSVG = function(L, focus){
   }), 0);
   return `<div id="${id}" data-gmap="1" style="height:min(55vh,420px);border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--muted)"></div>`;
 };
+
+/* ---------- Google Agenda: conectar e sincronizar (compromissos, aniversários e vencimentos) ---------- */
+const GA = {st: null, busy: false};
+const gaKeys = { get(){ try { return JSON.parse(store.get("bri.gaKeys") || "[]"); } catch { return []; } }, set(a){ store.set("bri.gaKeys", JSON.stringify(a)); } };
+async function gaAPI(acao, extra){
+  const t = await window.__bri.token();
+  const r = await fetch("/api/google-agenda", {method: "POST", headers: {"Content-Type": "application/json", Authorization: "Bearer " + t}, body: JSON.stringify({acao, ...(extra || {})})}).catch(() => null);
+  if (!r) throw new Error("Sem conexão com o site.");
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.message || "Erro " + r.status);
+  return j;
+}
+function gaEventos(){
+  const ev = [], ini = addMonths(T, -1), fim = addMonths(T, 12);
+  for (const a of st.agenda.values()){ if (a.deleted_at || a.done || !a.when) continue; const w = String(a.when).slice(0, 16);
+    ev.push(w.length > 10 ? {key: "appt" + a.id, titulo: `[Brilhante] ${a.title}`, descricao: [ATYPE[a.type] || a.type, a.client_name ? "Cliente: " + a.client_name : "", a.notes || ""].filter(Boolean).join("\n"), inicio: w}
+      : {key: "appt" + a.id, titulo: `[Brilhante] ${a.title}`, descricao: a.notes || "", dia: w.slice(0, 10)}); }
+  const Y = +T.slice(0, 4);
+  for (const p of birthdayPeople(clientIndex())){ if (!p.m || !p.d) continue;
+    ev.push({key: "bday" + norm(p.name) + p.kind, titulo: `🎂 Aniversário de ${p.name}`, descricao: `${p.kind} · Brilhante's Imóveis${p.phone ? "\nTelefone: " + fmtPhone(p.phone) : ""}`, dia: `${Y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")}`, anual: true}); }
+  if (isAdmin) for (const s of allSales()){ if (!isActive(s)) continue;
+    for (const q of planOf(s)){ if (q.recebida || q.avista || !q.venc || q.venc < ini || q.venc > fim) continue; const x = partsOf(q, s), falta = Math.max(x.liq - (q.pago || 0), 0); if (falta < 0.01) continue;
+      ev.push({key: `venc${s.id}-${q.n}`, titulo: `💰 Comissão: ${s.property_name} Q${s.quadra || "–"} L${s.lote || "–"} · parc. ${q.n} (${brl(falta)})`, descricao: `Cliente: ${s.client_name || "—"}\nCorretor: ${brokersOf(s).map(b => b.name).join(" + ") || "—"}\nCorretor recebe: ${brl(x.corretor)} · Imobiliária: ${brl(x.imob)}`, dia: q.venc}); } }
+  return ev;
+}
+async function gaSincronizar(silencioso){
+  if (GA.busy) return; GA.busy = true; gaPaint();
+  try {
+    const ev = gaEventos(), prev = new Set(gaKeys.get()), now = new Set(ev.map(e => e.key)), remover = [...prev].filter(k => !now.has(k));
+    let tot = {ok: 0, falhas: 0, removidos: 0};
+    for (let i = 0; i < ev.length || (i === 0 && remover.length); i += 250){
+      const r = await gaAPI("sincronizar", {eventos: ev.slice(i, i + 250), remover: i === 0 ? remover : []});
+      tot.ok += r.ok; tot.falhas += r.falhas; tot.removidos += r.removidos;
+    }
+    gaKeys.set([...now]); store.set("bri.gaDia", T);
+    const n = c => ev.filter(e => e.key.startsWith(c)).length;
+    if (!silencioso) toast(`Google Agenda atualizada: ${n("appt")} compromissos, ${n("bday")} aniversários, ${n("venc")} vencimentos${tot.falhas ? ` · ${tot.falhas} com erro` : ""}`);
+  } catch (e){ if (!silencioso) toast(e.message); }
+  GA.busy = false; gaPaint();
+}
+function gaCard(){
+  const s = GA.st;
+  if (!s) return `<section class="card" id="gaCard" style="margin-bottom:12px"><div class="bd" style="color:var(--mfg)">Verificando Google Agenda…</div></section>`;
+  const icon = `<span class="pill p-gold" style="font-size:14px">📅</span>`;
+  if (!s.configured) return `<section class="card" id="gaCard" style="margin-bottom:12px"><div class="bd toolbar" style="justify-content:space-between">${icon}<div style="flex:1;min-width:200px"><b>Google Agenda</b><span style="display:block;color:var(--mfg);font-size:13px">A sincronização ainda não foi configurada no site (falta o ID do cliente do Google na Vercel).</span></div></div></section>`;
+  return `<section class="card" id="gaCard" style="margin-bottom:12px"><div class="bd toolbar" style="justify-content:space-between;gap:10px">${icon}<div style="flex:1;min-width:200px"><b>Google Agenda</b><span style="display:block;color:var(--mfg);font-size:13px">${s.connected ? `Conectada${s.email ? " a " + esc(s.email) : ""} · envia compromissos, aniversários e vencimentos de comissão${store.get("bri.gaDia") ? " · última sincronização " + dBR(store.get("bri.gaDia")) : ""}` : "Conecte sua conta Google para ver compromissos, aniversários e vencimentos no celular."}</span></div>
+    <span class="toolbar">${s.connected ? `<button class="btn pri sm" data-ga="sync" ${GA.busy ? "disabled" : ""}>${GA.busy ? "Sincronizando…" : "Sincronizar agora"}</button><button class="btn sm" data-ga="off">Desconectar</button>` : `<button class="btn pri sm" data-ga="on">Conectar Google Agenda</button>`}</span></div></section>`;
+}
+function gaPaint(){ const c = document.getElementById("gaCard"); if (c) c.outerHTML = gaCard(); }
+async function gaStatus(){ try { GA.st = await gaAPI("status"); } catch { GA.st = {configured: false, connected: false}; } gaPaint(); return GA.st; }
+(function(){
+  if (typeof Agenda === "undefined") return;
+  const h = Agenda.html, b = Agenda.bind;
+  Agenda.html = () => { const x = h(); const i = x.indexOf('<section class="card">'); return i >= 0 ? x.slice(0, i) + gaCard() + x.slice(i) : gaCard() + x; };
+  Agenda.bind = function(){ b.apply(this, arguments); if (!GA.st) gaStatus(); };
+  document.addEventListener("click", async e => {
+    const btn = e.target.closest("[data-ga]"); if (!btn) return;
+    const a = btn.dataset.ga;
+    if (a === "sync") return gaSincronizar(false);
+    if (a === "on"){ try { const r = await gaAPI("login"); location.href = r.url; } catch (err){ toast(err.message); } return; }
+    if (a === "off"){ if (!confirm("Desconectar o Google Agenda? Os eventos já enviados continuam na sua agenda do Google.")) return; try { await gaAPI("desconectar"); gaKeys.set([]); await gaStatus(); toast("Google Agenda desconectada"); } catch (err){ toast(err.message); } }
+  });
+  // volta do Google após conectar
+  const q = new URLSearchParams(location.search).get("agenda");
+  window.claude.use("user").then(async () => {
+    if (q){ history.replaceState(null, "", location.pathname); setTimeout(async () => { toast(q === "conectada" ? "Google Agenda conectada! Enviando eventos…" : "Não foi possível conectar o Google Agenda."); if (q === "conectada"){ await gaStatus(); gaSincronizar(false); } }, 2500); return; }
+    // sincroniza sozinho uma vez por dia, quando o sistema abre
+    setTimeout(async () => { if (store.get("bri.gaDia") === T) return; const s = await gaStatus(); if (s.connected) gaSincronizar(true); }, 8000);
+  }, () => {});
+})();
