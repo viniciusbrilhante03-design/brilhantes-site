@@ -212,7 +212,7 @@ const nowISO = () => new Date().toISOString();
 const dBR = iso => { if (!iso) return "—"; const [y,m,d] = String(iso).slice(0,10).split("-"); return d ? `${d}/${m}/${y}` : iso; };
 const norm = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase().replace(/\s+/g, " ");
 const rid = p => p + "_" + Array.from(crypto.getRandomValues(new Uint8Array(6)), b => b.toString(16).padStart(2,"0")).join("");
-const parseMoney = s => { if (typeof s === "number") return s; s = String(s || "").replace(/[^\d,.-]/g, ""); if (s.includes(",")) s = s.replace(/\./g, "").replace(",", "."); return parseFloat(s) || 0; };
+const parseMoney = s => { if (typeof s === "number") return s; s = String(s || "").replace(/[^\d,.-]/g, ""); if (s.includes(",")) s = s.replace(/\./g, "").replace(",", "."); else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, ""); return parseFloat(s) || 0; };
 const addMonths = (iso, n) => { const [y,m,d] = iso.split("-").map(Number); const dt = new Date(Date.UTC(y, m - 1 + n, 1)); const last = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 0)).getUTCDate(); dt.setUTCDate(Math.min(d, last)); return dt.toISOString().slice(0,10); };
 const MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 const MES3 = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
@@ -1267,7 +1267,7 @@ function openLotNew(){
 
 /* ---- Ficha do loteamento ---- */
 let LT = {id: null, tab: "dados", edit: false};
-const LTABS = [["dados","Dados técnicos"],["midia","Fotos & vídeos"],["docs","Documentos"],["mapa","Mapa"],["arte","Arte"],["copys","Copys"],["ia","Assistente IA"],["vendas","Lotes vendidos"]];
+const LTABS = [["dados","Dados técnicos"],["midia","Fotos & vídeos"],["docs","Documentos"],["mapa","Mapa"],["arte","Arte"],["copys","Copys"],["ia","Assistente IA"]];
 function openLot(id, tab, edit){
   LT = {id, tab: tab || LT.tab || "dados", edit: !!edit};
   const sh = $("#sheet"); sh.classList.add("wide");
@@ -1325,10 +1325,10 @@ const LOTTAB = {
     const s = l.specs || {}, inf = infraList(s);
     const block = sec => { const rows = SPEC[sec][1].map(([k,lab,ty,opt]) => { let v = sv(l, sec, k); if (!String(v).trim()) return ""; if (opt) v = opt[v] || v; if (ty === "date") v = dBR(v); if (/valor|entrada|parcela_inicial/.test(k) && sec === "comercial") v = money(v); if (k === "maps") return `<div><span>${lab}</span><b><a href="${esc(v)}" target="_blank" rel="noopener">Abrir mapa</a></b></div>`; return `<div${ty==="area"?' style="grid-column:1/-1"':""}><span>${lab}</span><b style="white-space:pre-wrap;font-weight:500">${esc(v)}</b></div>`; }).join("");
       return rows ? `<div class="fs"><h3>${SPEC[sec][0]}</h3><div class="kv">${rows}</div></div>` : ""; };
-    const content = ["comercial","tecnicos","obra","localizacao"].map(block).join("");
+    const infHTML = inf.length ? `<div class="fs"><h3>Infraestrutura e lazer</h3><div class="toolbar">${inf.map(i => `<span class="pill p-gold">${esc(i)}</span>`).join("")}</div></div>` : "";
+    const content = block("tecnicos") + infHTML + ["obra","localizacao","comercial"].map(block).join("");
     return `${canWrite ? `<div class="toolbar" style="justify-content:space-between"><span class="toolbar"><span class="pill p-mut">ficha ${lotCompleteness(l)}% preenchida</span><label style="display:flex;gap:6px;align-items:center;font-size:13px">Fase <select id="phSel">${Object.entries(PHASES).map(([k,v]) => `<option value="${k}" ${(l.phase||"em_vendas")===k?"selected":""}>${v}</option>`).join("")}</select></label></span><span class="toolbar"><button class="btn danger sm" data-act="dellot">Excluir loteamento</button>${ai ? `<button class="btn sm" data-act="specai">Preencher com IA</button>` : ""}<button class="btn pri sm" data-act="edit">Editar ficha</button></span></div>` : ""}
       ${content || `<div class="empty"><b>Ficha em branco</b>Use “Editar ficha” para preencher os dados técnicos, a obra, a localização e as condições.</div>`}
-      ${inf.length ? `<div class="fs"><h3>Infraestrutura</h3><div class="toolbar">${inf.map(i => `<span class="pill p-gold">${esc(i)}</span>`).join("")}</div></div>` : ""}
       ${l.ai_training ? `<div class="fs"><h3>Treinamento da IA</h3><p style="margin:0;white-space:pre-wrap">${esc(l.ai_training)}</p></div>` : ""}
       ${(l.book||[]).length ? `<div class="fs"><h3>Material lido pela IA</h3>${l.book.map(b => `<div class="inst" style="grid-template-columns:minmax(0,1fr) auto"><div><b>${esc(b.titulo)}</b><span class="s" style="display:block;color:var(--mfg);font-size:12px">lido em ${dBR(b.em)} · ${Math.round((b.texto||"").length/1000)} mil caracteres</span>${b.resumo ? `<details><summary style="cursor:pointer;font-size:12px;color:var(--mfg)">Ver resumo</summary><p style="white-space:pre-wrap;font-size:13px;margin:6px 0 0">${esc(b.resumo)}</p></details>` : ""}</div>${canWrite ? `<button class="btn sm danger" data-act="delbook" data-id="${esc(b.id)}">Remover</button>` : ""}</div>`).join("")}</div>` : ""}`;
   },
@@ -1704,8 +1704,7 @@ function openLotC(l){
   const kv = sec => SPEC[sec][1].map(([k,lab,ty,opt]) => { let v = ((s[sec]||{})[k] ?? ""); if (!String(v).trim() || k === "coords") return ""; if (opt) v = opt[v] || v; if (ty === "date") v = dBR(v); if (/valor|entrada|parcela_inicial/.test(k) && sec === "comercial") v = money(v); if (k === "maps") return ""; return `<div><span>${lab}</span><b style="font-weight:500;white-space:pre-wrap">${esc(v)}</b></div>`; }).join("");
   const sh = sheet(`<div class="dlg"><div class="dh"><div style="flex:1"><h2>${esc(l.name)}</h2></div><button class="btn icon" data-x aria-label="Fechar">✕</button></div><div class="db">
     ${fotos.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">${fotos.map(m => `<a href="${esc(blobUrl(m))}" target="_blank" rel="noopener"><img src="${esc(blobUrl(m))}" alt="" loading="lazy" style="aspect-ratio:4/3;width:100%;object-fit:cover;border-radius:8px"></a>`).join("")}</div>` : ""}
-    ${["comercial","tecnicos","obra","localizacao"].map(sec => { const h = kv(sec); return h ? `<div class="fs"><h3>${SPEC[sec][0]}</h3><div class="kv">${h}</div></div>` : ""; }).join("")}
-    ${infraList(s).length ? `<div class="fs"><h3>Infraestrutura e lazer</h3><div class="toolbar">${infraList(s).map(i => `<span class="pill p-gold">${esc(i)}</span>`).join("")}</div></div>` : ""}
+    ${["tecnicos","INFRA","obra","localizacao","comercial"].map(sec => { if (sec === "INFRA") return infraList(s).length ? `<div class="fs"><h3>Infraestrutura e lazer</h3><div class="toolbar">${infraList(s).map(i => `<span class="pill p-gold">${esc(i)}</span>`).join("")}</div></div>` : ""; const h = kv(sec); return h ? `<div class="fs"><h3>${SPEC[sec][0]}</h3><div class="kv">${h}</div></div>` : ""; }).join("")}
     ${c ? `<div class="toolbar"><a class="btn sm pri" href="${esc(gmaps(c))}" target="_blank" rel="noopener">Google Maps</a><a class="btn sm" href="https://waze.com/ul?ll=${c[0]},${c[1]}&navigate=yes" target="_blank" rel="noopener">Waze</a></div>` : ""}
     ${docs.length ? `<div class="fs"><h3>Documentos</h3>${docs.map(m => `<a class="btn sm" href="${esc(blobUrl(m))}" target="_blank" rel="noopener" style="justify-content:flex-start">${esc(m.title || "Documento")} · ${esc(DOCCAT[m.category] || "")}</a>`).join("")}</div>` : ""}
     ${vids.length ? `<div class="fs"><h3>Vídeos</h3>${vids.map(m => `<a class="btn sm" href="${esc(blobUrl(m))}" target="_blank" rel="noopener" style="justify-content:flex-start">${esc(m.title || "Vídeo")}</a>`).join("")}</div>` : ""}
@@ -1760,7 +1759,7 @@ function aiFileModal({title, sub, accept, run}){
 /* ---- contexto de loteamento ---- */
 function lotText(l){
   const s = l.specs || {}, lines = [`LOTEAMENTO: ${l.name}`];
-  for (const sec of ["comercial","tecnicos","obra","localizacao"]){ const r = SPEC[sec][1].map(([k,lab,ty,opt]) => { let v = ((s[sec]||{})[k] ?? ""); if (!String(v).trim()) return ""; if (opt) v = opt[v] || v; return `- ${lab}: ${v}`; }).filter(Boolean); if (r.length) lines.push(`\n${SPEC[sec][0].toUpperCase()}:`, ...r); }
+  for (const sec of ["tecnicos","obra","localizacao","comercial"]){ const r = SPEC[sec][1].map(([k,lab,ty,opt]) => { let v = ((s[sec]||{})[k] ?? ""); if (!String(v).trim()) return ""; if (opt) v = opt[v] || v; return `- ${lab}: ${v}`; }).filter(Boolean); if (r.length) lines.push(`\n${SPEC[sec][0].toUpperCase()}:`, ...r); }
   const inf = infraList(s); if (inf.length) lines.push(`\nINFRAESTRUTURA: ${inf.join(", ")}`);
   for (const b of (l.book||[]).slice(-3)) lines.push(`\nMATERIAL DO LOTEAMENTO (arquivo: ${b.titulo}):` + (b.resumo ? `\nRESUMO:\n${b.resumo}` : "") + (b.texto ? `\nTEXTO DO ARQUIVO:\n${b.texto}` : ""));
   if (l.ai_training) lines.push(`\nINFORMAÇÕES EXTRAS (treinamento do gestor):\n${l.ai_training}`);
