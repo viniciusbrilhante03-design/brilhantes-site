@@ -1,0 +1,4 @@
+dados-iniciais.json
+backup-*.json
+node_modules/
+.vercel/
