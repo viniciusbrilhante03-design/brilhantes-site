@@ -97,3 +97,24 @@ create policy arquivos_gestor_alterar on storage.objects for update to authentic
 drop policy if exists arquivos_gestor_apagar on storage.objects;
 create policy arquivos_gestor_apagar on storage.objects for delete to authenticated
   using (bucket_id = 'arquivos' and public.is_admin());
+
+-- 5) Google Agenda (tokens de cada usuário; só o servidor acessa)
+create table if not exists public.google_tokens (
+  usuario       uuid primary key references auth.users (id) on delete cascade,
+  email         text,
+  access_token  text,
+  refresh_token text,
+  expires_at    timestamptz,
+  connected_at  timestamptz default now()
+);
+alter table public.google_tokens enable row level security;
+revoke all on public.google_tokens from anon, authenticated;
+
+-- 6) Brilhante's IA: corretor lê a própria agenda
+create or replace function public.meu_usuario() returns text
+language sql stable security definer set search_path = public as $$
+  select usuario_id from public.profiles where id = auth.uid()
+$$;
+drop policy if exists docs_corretor_agenda on public.docs;
+create policy docs_corretor_agenda on public.docs for select to authenticated
+  using (collection = 'agenda' and data->>'owner_id' = public.meu_usuario());
