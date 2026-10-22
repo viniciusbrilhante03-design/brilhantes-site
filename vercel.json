@@ -15,6 +15,9 @@
     },
     "api/google-agenda.js": {
       "maxDuration": 60
+    },
+    "api/voz.js": {
+      "maxDuration": 30
     }
   },
   "headers": [

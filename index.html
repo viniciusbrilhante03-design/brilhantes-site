@@ -1613,7 +1613,7 @@ function openExport(){
 
 /* ---- Portal dos corretores: espelho escrito pelo gestor ---- */
 const lastPortal = new Map(); let portalTimer = null;
-function slimLots(){ return lotList().map(l => ({id: l.id, name: l.name, phase: l.phase || "em_vendas", specs: l.specs || {}, copies: l.copies || [], ai_training: l.ai_training || "", lat: l.lat, lng: l.lng, media: lotMedia(l.id).filter(m => m.asset_id || m.url).map(m => ({id: m.id, kind: m.kind, asset_id: m.asset_id || null, url: m.url || "", title: m.title || "", category: m.category || "", caption: m.caption || "", content_type: m.content_type || "", cover: !!m.cover}))})); }
+function slimLots(){ return lotList().map(l => ({id: l.id, name: l.name, phase: l.phase || "em_vendas", specs: l.specs || {}, copies: l.copies || [], ai_training: l.ai_training || "", lat: l.lat, lng: l.lng, order: l.order, vendidos: lotSales(l).length, vendidosQL: lotSales(l).map(s => [String(s.quadra || ""), String(s.lote || "")]).slice(0, 600), resumo: (l.book || []).map(b => b.resumo).filter(Boolean).join("\n\n").slice(0, 2500), media: lotMedia(l.id).filter(m => m.asset_id || m.url).map(m => ({id: m.id, kind: m.kind, asset_id: m.asset_id || null, url: m.url || "", title: m.title || "", category: m.category || "", caption: m.caption || "", content_type: m.content_type || "", cover: !!m.cover}))})); }
 function rankSnapshot(){ const y = ui.year, out = {ano: y, gerado: nowISO(), meses: {}}; for (let m = 0; m <= 12; m++){ const L = allSales().filter(s => isActive(s) && inPeriod(s, m, y)); if (!L.length) continue; const f = r => ({label: r.label, qtd: +r.qtd.toFixed(2), vgv: Math.round(r.vgv), members: r.members || []}); out.meses[m] = {corretores: ranking(L, "corretores").map(f), duplas: ranking(L, "duplas").map(f)}; } return out; }
 function portalFor(u){
   const p = {id: u.id, name: (u.war_name || u.name || "").trim(), full: (u.name || "").trim()}, vendas = [];
@@ -2695,5 +2695,6 @@ const VIEWS = {financeiro_rel: FinanceiroV2, mapa: MapaGeral, assistente: Assist
 </script>
 
 <script src="/js/sistema.js"></script>
+<script src="/js/bia.js"></script>
 </body>
 </html>
