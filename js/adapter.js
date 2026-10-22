@@ -18,7 +18,7 @@ async function config(){
   const r = await fetch("/api/config", {cache: "no-store"}).catch(() => null);
   const j = r && r.ok ? await r.json().catch(() => null) : null;
   if (!j || !j.url || !j.anon) throw fail("config", "Configuração do banco ausente");
-  CFG = {url: j.url.replace(/\/+$/, ""), anon: j.anon};
+  CFG = {url: j.url.replace(/\/+$/, ""), anon: j.anon, gmaps: j.gmaps || ""};
   return CFG;
 }
 
@@ -402,5 +402,5 @@ window.claude = {
     }
   }
 };
-window.__bri = {token, logout, api, isAdmin: isAdm, email: () => SES && SES.user.email};
+window.__bri = {token, logout, api, isAdmin: isAdm, email: () => SES && SES.user.email, cfg: () => CFG || {}};
 })();
