@@ -1,4 +1,4 @@
-// Assistente de IA. Só o gestor pode usar.
+// Assistente de IA (gestor e corretores logados).
 // Funciona com a chave da Anthropic (ANTHROPIC_API_KEY) ou da OpenAI (OPENAI_API_KEY). Se houver as duas, usa a Anthropic.
 // O navegador sempre fala no mesmo formato; quando a chave é da OpenAI, a conversa é traduzida aqui.
 const {caller, body} = require("./_lib");
@@ -61,7 +61,7 @@ module.exports = async (req, res) => {
   if (!ak && !ok) return res.status(503).json({error: {code: "sampling_disabled", message: "Falta a chave da IA na Vercel (ANTHROPIC_API_KEY ou OPENAI_API_KEY)"}});
   const who = await caller(req).catch(() => null);
   if (!who) return res.status(401).json({error: {code: "session_expired"}});
-  if (who.role !== "admin") return res.status(403).json({error: {code: "not_granted"}});
+  if (who.role !== "admin" && who.role !== "corretor") return res.status(403).json({error: {code: "not_granted"}});
   const b = body(req);
   if (!Array.isArray(b.messages) || !b.messages.length) return res.status(400).json({error: {code: "empty_completion"}});
   try {
