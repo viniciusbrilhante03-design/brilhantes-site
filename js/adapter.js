@@ -397,7 +397,7 @@ window.claude = {
       case "user": return user;
       case "assets": return isAdm() ? assets : null;
       case "downloads": return downloads;
-      case "sample": return isAdm() ? sample : null;
+      case "sample": return sample;           // gestor e corretores (a Brilhante's IA usa)
       default: return null;          // "room" e outros não existem no site próprio
     }
   }
