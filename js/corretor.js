@@ -16,6 +16,48 @@ async function corAPI(body){
 const diasDesde = iso => { const t = Date.parse(iso || ""); return isFinite(t) ? Math.floor((Date.now() - t) / 864e5) : null; };
 const podeEditar = v => { const d = diasDesde(v && v.created_at); return d == null || d <= PRAZO; };
 
+(function(){ const st2 = document.createElement("style"); st2.textContent = `
+.rank li.duo{grid-template-columns:26px 50px minmax(0,1fr) auto}
+.av.duo{position:relative;width:50px;overflow:visible;background:none}
+.av.duo i{position:absolute;top:1px;width:32px;height:32px;border-radius:50%;overflow:hidden;display:grid;place-items:center;background:var(--goldbg);color:var(--gold);font-style:normal;font-size:11px;font-weight:700;border:2px solid var(--card)}
+.av.duo i:first-child{left:0;z-index:1}.av.duo i:last-child{left:17px}
+.av.duo img{width:100%;height:100%;object-fit:cover}
+.chips-o{display:flex;flex-wrap:wrap;gap:6px}
+.chips-o button{border:1px solid var(--border);background:var(--card);color:var(--fg);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+.chips-o button.on{background:var(--primary);color:var(--pfg);border-color:var(--primary)}
+.cx-lbl{font-size:13px;font-weight:600}`; document.head.appendChild(st2); })();
+const ORIGEM = [["acao", "Ação"], ["lead", "Lead anúncio"], ["carteira", "Carteira"], ["stand", "Stand"], ["indicacao", "Indicação"], ["outro", "Outro"]];
+function blocoExtrasCliente(v, pre){
+  const sp = v.spouse || {};
+  return `<div class="cx" style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="cx-lbl">Possui cônjuge/companheiro?</span><span class="chips-o" data-cxsp><button type="button" data-v="0" class="${v.has_spouse ? "" : "on"}">Não</button><button type="button" data-v="1" class="${v.has_spouse ? "on" : ""}">Sim</button></span></div>
+    <div class="g" data-cxspf ${v.has_spouse ? "" : "hidden"}>
+      <label class="f">Nome do cônjuge<input type="text" data-cxk="name" value="${esc(sp.name || "")}"></label><label class="f">Telefone<input type="tel" data-cxk="phone" value="${esc(sp.phone || "")}"></label>
+      <label class="f">CPF<input type="text" data-cxk="cpf" value="${esc(sp.cpf || "")}"></label><label class="f">Nascimento<input type="date" data-cxk="birthdate" value="${esc(sp.birthdate || "")}"></label></div>
+    <div style="display:flex;flex-direction:column;gap:6px"><span class="cx-lbl">Origem <span style="color:var(--mfg);font-weight:400">(opcional)</span></span><span class="chips-o" data-cxor>${ORIGEM.map(([k, l]) => `<button type="button" data-v="${k}" class="${v.origin === k ? "on" : ""}">${l}</button>`).join("")}</span></div>
+    <label class="f">Observação do cliente <span style="color:var(--mfg);font-weight:400">(opcional)</span><textarea data-cxnotes rows="2" placeholder="Fica no cadastro do cliente">${esc(v.notes || "")}</textarea></label></div>`;
+}
+// liga os botões do bloco; onChange recebe {has_spouse, spouse, origin, notes}
+function ligarExtras(root, val, onChange){
+  const up = () => onChange(val);
+  root.querySelector("[data-cxsp]").onclick = e => { const b = e.target.closest("button"); if (!b) return; val.has_spouse = b.dataset.v === "1"; root.querySelectorAll("[data-cxsp] button").forEach(x => x.classList.toggle("on", x === b)); root.querySelector("[data-cxspf]").hidden = !val.has_spouse; up(); };
+  root.querySelector("[data-cxor]").onclick = e => { const b = e.target.closest("button"); if (!b) return; val.origin = val.origin === b.dataset.v ? "" : b.dataset.v; root.querySelectorAll("[data-cxor] button").forEach(x => x.classList.toggle("on", x.dataset.v === val.origin)); up(); };
+  root.querySelectorAll("[data-cxk]").forEach(i => i.oninput = () => { val.spouse = {...(val.spouse || {}), [i.dataset.cxk]: i.value}; up(); });
+  root.querySelector("[data-cxnotes]").oninput = e => { val.notes = e.target.value; up(); };
+}
+const iniciais = n => String(n || "").trim().split(/\s+/).slice(0, 2).map(x => x[0] || "").join("").toUpperCase();
+function avatarDupla(li, membros, foto){
+  const av = li.querySelector(".av"); if (!av || av.classList.contains("duo")) return;
+  li.classList.add("duo"); av.classList.add("duo");
+  av.innerHTML = membros.slice(0, 2).map(n => { const f = foto(n); return `<i>${f ? `<img alt="" src="${esc(f)}">` : esc(iniciais(n))}</i>`; }).join("");
+}
+// gestor: duas fotos nas duplas do ranking do Painel (e de qualquer lista de ranking)
+let _rkT = 0;
+new MutationObserver(() => { cancelAnimationFrame(_rkT); _rkT = requestAnimationFrame(() => {
+  if (typeof isAdmin === "undefined" || !isAdmin) return;
+  $$("ol.rank li").forEach(li => { const meta = li.querySelector(".meta"); if (!meta) return; const m = meta.textContent.split(" & ").map(x => x.trim()).filter(Boolean); if (m.length >= 2) avatarDupla(li, m, n => photoFor(n)); });
+}); }).observe(document.documentElement, {childList: true, subtree: true});
+
 /* =================== RANKING: duplas cadastradas entram como uma linha só =================== */
 if (typeof ranking === "function"){
   const _ranking = ranking;
@@ -163,6 +205,40 @@ if (typeof TABS !== "undefined" && typeof VIEWS !== "undefined"){
   VIEWS.duplicados = Duplicados;
 }
 
+/* =================== VENDA: cônjuge, origem e observação do cliente =================== */
+function registroCliente(nome, cpf){
+  const k = norm(nome), c = onlyDigits(cpf), L = isAdmin ? [...st.clientes.values()] : (COR.clientes || []);
+  return L.find(x => !x.deleted_at && ((c.length === 11 && onlyDigits(x.cpf) === c) || (k && norm(x.name) === k))) || null;
+}
+if (typeof openSaleForm === "function"){
+  const _osf = openSaleForm;
+  openSaleForm = function(init){
+    const r = _osf.apply(this, arguments);
+    try {
+      const anchor = $("#sf_client_birthdate"); if (!anchor || !F) return r;
+      const fs = anchor.closest(".fs"); if (!fs || fs.querySelector(".cx")) return r;
+      const reg = registroCliente(F.client_name, F.client_cpf) || {};
+      const val = {has_spouse: F.client_has_spouse ?? !!reg.has_spouse, spouse: F.client_spouse || reg.spouse || null, origin: F.client_origin ?? (reg.origin || ""), notes: F.client_notes ?? (reg.notes || "")};
+      const aplica = v => { F.client_has_spouse = !!v.has_spouse; F.client_spouse = v.has_spouse ? (v.spouse || {}) : null; F.client_origin = v.origin || ""; F.client_notes = v.notes || ""; };
+      aplica(val);
+      fs.insertAdjacentHTML("beforeend", blocoExtrasCliente(val));
+      ligarExtras(fs.querySelector(".cx"), val, aplica);
+      const nm = $("#sf_client_name"); if (nm) nm.addEventListener("change", () => { const rg = registroCliente(nm.value, $("#sf_client_cpf") && $("#sf_client_cpf").value); if (!rg) return; const v2 = {has_spouse: !!rg.has_spouse, spouse: rg.spouse || null, origin: rg.origin || "", notes: rg.notes || ""}; aplica(v2); const cx = fs.querySelector(".cx"); cx.outerHTML = blocoExtrasCliente(v2); ligarExtras(fs.querySelector(".cx"), v2, aplica); });
+    } catch (e){ console.warn("extras cliente", e); }
+    return r;
+  };
+}
+// gestor: ao salvar a venda, guarda cônjuge/origem/observação no cadastro do cliente
+function salvarClienteDaVenda(V){
+  const name = String(V.client_name || "").trim(); if (!name || !(V.client_has_spouse || V.client_origin || V.client_notes)) return;
+  const cur = registroCliente(name, V.client_cpf);
+  const doc = {...(cur || {id: rid("client"), created_at: nowISO()}), name: cur ? cur.name : name, name_key: norm(cur ? cur.name : name),
+    phone: (cur && cur.phone) || V.client_phone || "", email: (cur && cur.email) || V.client_email || "", cpf: (cur && cur.cpf) || V.client_cpf || "", cpf_key: onlyDigits((cur && cur.cpf) || V.client_cpf), birthdate: (cur && cur.birthdate) || V.client_birthdate || "",
+    has_spouse: !!V.client_has_spouse, spouse: V.client_has_spouse ? (V.client_spouse || {}) : null, origin: V.client_origin || "", notes: V.client_notes || ""};
+  if (cur && JSON.stringify({...cur, updated_at: 0}) === JSON.stringify({...doc, updated_at: 0})) return;
+  saveDoc("clientes", doc);
+}
+
 /* =================== CORRETOR =================== */
 function prepararDadosCorretor(){
   for (const l of (PUB.lots || [])) if (!st.loteamentos.has(l.id)) st.loteamentos.set(l.id, {id: l.id, name: l.name});
@@ -205,7 +281,7 @@ if (typeof fillClient === "function"){
 if (typeof submitSale === "function"){
   const _submit = submitSale;
   submitSale = async function(editing){
-    if (isAdmin || !$("#saleForm") || !$("#saleForm").dataset.cor) return _submit.apply(this, arguments);
+    if (isAdmin || !$("#saleForm") || !$("#saleForm").dataset.cor){ const V = F, r = _submit.apply(this, arguments); try { if (isAdmin && !$("#dlg").open) salvarClienteDaVenda(V); } catch (e){ console.warn(e); } return r; }
     const err = [], warn = h => { $("#warn").innerHTML = h; $("#warn").scrollIntoView({block: "nearest"}); };
     if (!String(F.property_name || "").trim()) err.push("Informe o loteamento.");
     if (!F.sale_date) err.push("Informe a data da venda.");
@@ -232,6 +308,8 @@ if (typeof submitSale === "function"){
 }
 function formCliente(c){
   c = c || {name: "", phone: "", email: "", cpf: "", birthdate: "", origin: "", notes: ""};
+  const EXT = {has_spouse: !!c.has_spouse, spouse: c.spouse || null, origin: c.origin || "", notes: c.notes || ""};
+  setTimeout(() => { const cx = $("#dlg .cx"); if (cx) ligarExtras(cx, EXT, () => {}); }, 0);
   modal(`<form class="dlg" novalidate style="max-width:560px"><div class="dh"><div style="flex:1"><h2>${c.id ? "Editar cliente" : "Novo cliente"}</h2><p>Fica na sua carteira. O gestor também vê.</p></div><button type="button" class="btn icon" data-x aria-label="Fechar">✕</button></div>
     <div class="db"><div class="g">
       <label class="f" style="grid-column:1/-1">Nome *<input type="text" name="name" value="${esc(c.name)}" required></label>
@@ -239,14 +317,14 @@ function formCliente(c){
       <label class="f">E-mail<input type="email" name="email" value="${esc(c.email)}"></label>
       <label class="f">CPF<input type="text" name="cpf" value="${esc(c.cpf)}"></label>
       <label class="f">Nascimento<input type="date" name="birthdate" value="${esc(String(c.birthdate || "").slice(0, 10))}"></label>
-      <label class="f">Origem<select name="origin"><option value="">—</option>${Object.entries(ORIG).map(([k, l]) => `<option value="${k}" ${c.origin === k ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
-      <label class="f">Observações<textarea name="notes" rows="3">${esc(c.notes || "")}</textarea></label><div id="cfWarn"></div></div>
+</div>
+      ${blocoExtrasCliente(c)}<div id="cfWarn"></div></div>
     <div class="df"><button type="button" class="btn" data-x>Cancelar</button><button class="btn pri">Salvar</button></div></form>`, async (fd, f) => {
       const name = fv(fd, "name"); if (!name) return $("#cfWarn").innerHTML = `<div class="alert e">Informe o nome.</div>`;
       const cpf = onlyDigits(fv(fd, "cpf"));
       if (!c.id){ const ex = meusClientes().find(x => norm(x.nome) === norm(name) || (cpf.length === 11 && x.reg && onlyDigits(x.reg.cpf) === cpf)); if (ex && ex.reg) return $("#cfWarn").innerHTML = `<div class="alert w">Você já tem o cliente <b>${esc(ex.nome)}</b> com este nome ou CPF.</div>`; }
       const b = f.querySelector("button.pri"); b.disabled = true;
-      try { await corAPI({acao: "cliente", cliente: {...c, name, phone: fv(fd, "phone"), email: fv(fd, "email"), cpf: fv(fd, "cpf"), birthdate: fv(fd, "birthdate"), origin: fv(fd, "origin"), notes: fv(fd, "notes")}}); $("#dlg").close(); toast("Cliente salvo"); await carregarClientes(); if (ui.tab === "clientesC") renderCorretor(); }
+      try { await corAPI({acao: "cliente", cliente: {...c, name, phone: fv(fd, "phone"), email: fv(fd, "email"), cpf: fv(fd, "cpf"), birthdate: fv(fd, "birthdate"), has_spouse: !!EXT.has_spouse, spouse: EXT.has_spouse ? (EXT.spouse || {}) : null, origin: EXT.origin || "", notes: EXT.notes || ""}}); $("#dlg").close(); toast("Cliente salvo"); await carregarClientes(); if (ui.tab === "clientesC") renderCorretor(); }
       catch (e){ b.disabled = false; $("#cfWarn").innerHTML = `<div class="alert e">${esc(e.message)}</div>`; }
     });
 }
@@ -281,7 +359,7 @@ function telaFinanceiro(){
   return `<div class="pagehead"><div><h1>Meu financeiro</h1><p>${esc(periodLabel())} · parcelas da sua comissão pelo vencimento</p></div></div>
     <section class="kpis">${[["Minha comissão no período", brl(tot.total), "var(--gold)"], ["Já recebi", brl(tot.rec), "var(--ok)"], ["Falta receber", brl(tot.total - tot.rec), "var(--warn)"], ["Vencido", brl(tot.venc), "var(--bad)"]].map(([l, v, c]) => `<div class="card kpi" style="--c:${c}"><span class="lbl"><i class="dot"></i>${l}</span><span class="val num">${v}</span></div>`).join("")}</section>
     <section class="card"><div class="bd"><div class="toolbar" style="margin-bottom:10px">${[["abertas", "A receber"], ["vencidas", "Vencidas"], ["recebidas", "Recebidas"], ["todas", "Todas"]].map(([k, l]) => `<button class="btn sm ${f === k ? "pri" : ""}" data-fin="${k}">${l}</button>`).join("")}</div>
-    ${L.length ? `<div class="tablewrap"><table><thead><tr><th>Vencimento</th><th>Venda</th><th>Parcela</th><th class="r">Minha parte</th><th class="r">Recebido</th><th>Status</th><th></th></tr></thead><tbody>${L.map(r => `<tr data-v="${esc(r.v.id)}" style="cursor:pointer"><td class="num">${dBR(r.due)}</td><td><b>${esc(r.v.property_name)}</b><span class="s">Q ${esc(r.v.quadra) || "–"} · L ${esc(r.v.lote) || "–"} · ${esc(r.v.client_name) || "—"}</span></td><td>${esc(r.n)}</td><td class="r num">${brl(r.valor)}</td><td class="r num">${brl(r.pago)}</td><td><span class="pill ${r.st[1]}">${r.st[0]}</span></td><td class="r"><button class="btn sm ${r.st[0] === "Recebida" ? "" : "pri"}" data-receber="${esc(r.v.id)}" data-parc="${r.num || 0}" data-ok="${r.st[0] === "Recebida" ? 0 : 1}">${r.st[0] === "Recebida" ? "Desmarcar" : "Recebi"}</button></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Nada neste filtro e período.</div>`}
+    ${L.length ? `<div class="tablewrap"><table><thead><tr><th>Vencimento</th><th>Venda</th><th>Parcela</th><th class="r">Minha parte</th><th class="r">Recebido</th><th>Status</th><th></th></tr></thead><tbody>${L.map(r => `<tr data-v="${esc(r.v.id)}" style="cursor:pointer"><td class="num">${dBR(r.due)}</td><td><b>${esc(r.v.property_name)}</b><span class="s">Q ${esc(r.v.quadra) || "–"} · L ${esc(r.v.lote) || "–"} · ${esc(r.v.client_name) || "—"}</span></td><td>${esc(r.n)}</td><td class="r num">${brl(r.valor)}</td><td class="r num">${brl(r.pago)}</td><td><span class="pill ${r.st[1]}">${r.st[0]}</span></td><td class="r">${r.v.avulsa ? "" : `<button class="btn sm ${r.st[0] === "Recebida" ? "" : "pri"}" data-receber="${esc(r.v.id)}" data-parc="${r.num || 0}" data-ok="${r.st[0] === "Recebida" ? 0 : 1}">${r.st[0] === "Recebida" ? "Desmarcar" : "Recebi"}</button>`}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Nada neste filtro e período.</div>`}
     <p style="color:var(--mfg);font-size:12px;margin:10px 0 0">Ao marcar “Recebi”, o gestor é avisado e a baixa fica registrada na Auditoria. Vendas recém-cadastradas aparecem com valores estimados até o gestor abrir o sistema.</p></div></section>`;
 }
 if (typeof bootCorretor === "function"){
@@ -317,10 +395,11 @@ if (typeof bootCorretor === "function"){
     if ((ui.tab === "rankC" || ui.tab === "meu") && COR.fotos){
       $$("#main ol.rank li").forEach(li => { const av = li.querySelector(".av"), nm = li.querySelector(".nm"), meta = li.querySelector(".meta"); if (!av || !nm || av.querySelector("img")) return;
         const label = nm.textContent.replace(/\s*\(você\)\s*$/, ""), membros = meta ? meta.textContent.split(" & ") : [];
-        const f = fotoDe(label) || membros.map(fotoDe).find(Boolean); if (f) av.innerHTML = `<img alt="" src="${esc(f)}">`;
+        if (membros.length >= 2) avatarDupla(li, membros, fotoDe); else { const f = fotoDe(label); if (f) av.innerHTML = `<img alt="" src="${esc(f)}">`; }
         if (PORTAL && membros.some(m => norm(m) === norm(PORTAL.nome)) && !/\(você\)/.test(nm.textContent)){ nm.insertAdjacentText("beforeend", " (você)"); li.style.background = "var(--goldbg)"; li.style.borderRadius = "8px"; } });
     }
     const head = $("#main .pagehead");
+    if (ui.tab === "meu" && head && COR.fotos && !head.querySelector(".av")){ const f = fotoDe(PORTAL.nome); if (f){ head.style.alignItems = "center"; head.insertAdjacentHTML("afterbegin", `<span class="av" style="width:56px;height:56px;flex:none"><img alt="" src="${esc(f)}"></span>`); } }
     if ((ui.tab === "vendasC" || ui.tab === "meu") && head && !head.querySelector("[data-novavenda]")){ head.insertAdjacentHTML("beforeend", `<button class="btn pri" data-novavenda>+ Nova venda</button>`); head.querySelector("[data-novavenda]").onclick = () => abrirFormVenda(); }
     if (ui.tab === "lotsC" && head && !$("#lotQ")){
       head.insertAdjacentHTML("afterend", `<input type="search" id="lotQ" placeholder="Pesquisar loteamento, cidade ou bairro" value="${esc(COR.lotQ)}" style="width:100%;margin:0 0 12px">`);
@@ -332,6 +411,7 @@ if (typeof bootCorretor === "function"){
     const r = _openV.apply(this, arguments);
     if (!v || isAdmin) return r;
     const db2 = $("#sheet .db"); if (!db2) return r;
+    if (v.avulsa) return r;
     const d = diasDesde(v.created_at), ok = podeEditar(v);
     db2.insertAdjacentHTML("afterbegin", `<div class="toolbar" style="align-items:center">${ok ? `<button class="btn pri sm" data-editarvenda>Editar venda</button><span style="color:var(--mfg);font-size:12px">${d != null ? `Editável por mais ${Math.max(PRAZO - d, 0)} dias` : ""}</span>` : `<span class="pill p-mut">Cadastrada há mais de ${PRAZO} dias · só o gestor altera</span>`}</div>`);
     const b = db2.querySelector("[data-editarvenda]");
