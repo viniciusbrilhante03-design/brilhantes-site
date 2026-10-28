@@ -19,7 +19,11 @@ const now = () => new Date().toISOString();
 const dataOk = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ""));
 const TIPOS = new Set(["visita", "plantao", "ligacao", "outro"]);
 const prazoVencido = s => { const c = Date.parse(s && s.created_at); return isFinite(c) && Date.now() - c > PRAZO_DIAS * 864e5; };
-const participa = (s, uid) => s && (s.owner_id === uid || (s.broker_ids || []).includes(uid) || (s.brokers || []).some(b => b.owner_id === uid));
+// participa pelo id ou pelo nome (vendas antigas muitas vezes só têm o nome do corretor)
+const participa = (s, uid, nomes) => { if (!s) return false; const N2 = new Set((nomes || []).map(norm).filter(Boolean));
+  return s.owner_id === uid || (s.broker_ids || []).includes(uid) || (s.brokers || []).some(b => b.owner_id === uid || N2.has(norm(b.name))) || (!(s.brokers || []).length && N2.has(norm(s.broker_name))); };
+const nomesDe = u => [u && u.war_name, u && u.name];
+const ORIGENS = new Set(["acao", "lead", "carteira", "stand", "indicacao", "outro"]);
 
 async function appendItem(col, ym, item, max){
   const cur = await getDoc(col, ym); const itens = [...((cur && cur.itens) || []), item];
@@ -33,7 +37,7 @@ async function usuarios(){
 async function espelhar(s, US){
   const sp = N(s.broker_split) || 60, tot = (s.brokers || []).reduce((a, b) => a + N(b.split_pct), 0) || 100;
   for (const b of s.brokers || []){
-    const u = US.find(x => x.id === b.owner_id); if (!u || !u.claude_id) continue;
+    const u = US.find(x => x.id === b.owner_id) || US.find(x => x.role === "corretor" && nomesDe(x).some(n => norm(n) && norm(n) === norm(b.name))); if (!u || !u.claude_id) continue;
     const share = N(b.split_pct) / tot, p = await getDoc("portal", u.claude_id); if (!p) continue;
     const old = (p.vendas || []).find(v => v.id === s.id) || {};
     const fator = sp / 100 * share, liq = N(s.commission_net || s.commission_value);
@@ -48,6 +52,21 @@ async function espelhar(s, US){
   }
 }
 
+// guarda cônjuge, origem e observação no cadastro do cliente (carteira do corretor)
+async function clienteDaVenda(s, uid, prof){
+  const name = S(s.client_name, 120); if (!name || !(s.client_has_spouse || s.client_origin || s.client_notes)) return;
+  const cpf = String(s.client_cpf || "").replace(/\D/g, "");
+  const r = await db(`/rest/v1/docs?select=data&collection=eq.clientes&data->>name_key=eq.${encodeURIComponent(norm(name))}`);
+  let L = (r.ok && r.j ? r.j.map(x => x.data) : []).filter(c => !c.deleted_at);
+  if (cpf.length === 11){ const r2 = await db(`/rest/v1/docs?select=data&collection=eq.clientes&data->>cpf_key=eq.${cpf}`); L = [...L, ...(r2.ok && r2.j ? r2.j.map(x => x.data) : [])].filter(c => !c.deleted_at); }
+  const cur = L.find(c => c.owner_id === uid) || L.find(c => !c.owner_id) || null;
+  if (!cur && L.length) return; // cliente já cadastrado por outro corretor: não mexe
+  const doc = {...(cur || {id: rid("client"), created_at: now(), origem_cadastro: "corretor", owner_id: uid, broker_name: prof.nome || ""}), name: cur ? cur.name : name, name_key: norm(cur ? cur.name : name),
+    phone: (cur && cur.phone) || s.client_phone || "", email: (cur && cur.email) || s.client_email || "", cpf: (cur && cur.cpf) || s.client_cpf || "", cpf_key: (cur && cur.cpf_key) || cpf, birthdate: (cur && cur.birthdate) || s.client_birthdate || "",
+    has_spouse: !!s.client_has_spouse, spouse: s.client_has_spouse ? s.client_spouse : null, origin: s.client_origin || (cur && cur.origin) || "", notes: s.client_notes || (cur && cur.notes) || "", updated_at: now()};
+  await putDocs([{collection: "clientes", id: doc.id, data: doc}]);
+}
+
 async function salvarVenda(b, prof, res){
   const d = b.venda || {}, uid = prof.usuario_id;
   const US = await usuarios(), eu = US.find(u => u.id === uid) || {};
@@ -56,7 +75,7 @@ async function salvarVenda(b, prof, res){
   if (d.id){
     old = await getDoc("vendas", S(d.id, 60));
     if (!old || old.deleted_at) return res.status(404).json({message: "Venda não encontrada."});
-    if (!participa(old, uid)) return res.status(403).json({message: "Essa venda não é sua."});
+    if (!participa(old, uid, [...nomesDe(eu), prof.nome])) return res.status(403).json({message: "Essa venda não é sua."});
     if (prazoVencido(old)) return res.status(403).json({message: `Essa venda foi cadastrada há mais de ${PRAZO_DIAS} dias. Só o gestor pode alterar.`});
   }
   const s = {
@@ -65,7 +84,9 @@ async function salvarVenda(b, prof, res){
     sale_date: S(d.sale_date, 10), sale_value: N(d.sale_value), financed_value: N(d.financed_value), entrada: N(d.entrada),
     commission_base: d.commission_base === "financed" ? "financed" : "sale", commission_rate: N(d.commission_rate), broker_split: Math.min(Math.max(N(d.broker_split), 0), 100),
     discounts: (Array.isArray(d.discounts) ? d.discounts : []).filter(x => N(x.value) > 0).slice(0, 20).map(x => ({type: S(x.type, 30), value: N(x.value), reason: S(x.reason, 200)})),
-    parcelado: !!d.parcelado, notes: S(d.notes, 2000)};
+    parcelado: !!d.parcelado, notes: S(d.notes, 2000),
+    client_has_spouse: !!d.client_has_spouse, client_spouse: d.client_has_spouse ? {name: S((d.client_spouse || {}).name, 120), phone: S((d.client_spouse || {}).phone, 40), cpf: S((d.client_spouse || {}).cpf, 20), birthdate: S((d.client_spouse || {}).birthdate, 10)} : null,
+    client_origin: ORIGENS.has(d.client_origin) ? d.client_origin : "", client_notes: S(d.client_notes, 2000)};
   const err = [];
   if (!s.property_name) err.push("Informe o loteamento.");
   if (!dataOk(s.sale_date)) err.push("Informe a data da venda.");
@@ -110,6 +131,7 @@ async function salvarVenda(b, prof, res){
   await appendItem("auditoria", ym, {id: rid("aud"), action: old ? "update" : "create", sale_id: doc.id, property_name: doc.property_name, quadra: doc.quadra, lote: doc.lote, client_name: doc.client_name, broker_name: doc.broker_name, sale_value: doc.sale_value, detail: old ? "Venda editada pelo corretor" : "Venda cadastrada pelo corretor", by: meuNome, by_id: uid, at: now()}).catch(() => {});
   await appendItem("avisos", ym, {id: rid("ntf"), type: "venda", message: `${meuNome} ${old ? "editou" : "cadastrou"} a venda de ${doc.client_name || "cliente"} · ${doc.property_name} Q${doc.quadra || "-"} L${doc.lote || "-"}`, to: "gestor", meta: {sale_id: doc.id}, at: now()}, 1500).catch(() => {});
   await espelhar(doc, US).catch(() => {});
+  await clienteDaVenda(doc, uid, prof).catch(() => {});
   return res.status(200).json({venda: doc});
 }
 
@@ -142,7 +164,8 @@ module.exports = async (req, res) => {
     if (b.acao === "venda") return await salvarVenda(b, prof, res);
     if (b.acao === "receber"){
       const s = await getDoc("vendas", S(b.id, 60));
-      if (!s || s.deleted_at || !participa(s, uid)) return res.status(404).json({message: "Venda não encontrada."});
+      const eu0 = (await usuarios()).find(u => u.id === uid);
+      if (!s || s.deleted_at || !participa(s, uid, [...nomesDe(eu0), prof.nome])) return res.status(404).json({message: "Venda não encontrada."});
       const ok = !!b.recebida, n = Math.floor(N(b.parcela)), hoje = now().slice(0, 10);
       let det;
       if (n > 0 && (s.installments || []).length){
@@ -162,7 +185,8 @@ module.exports = async (req, res) => {
     }
     if (b.acao === "venda_ler"){
       const s = await getDoc("vendas", S(b.id, 60));
-      if (!s || s.deleted_at || !participa(s, uid)) return res.status(404).json({message: "Venda não encontrada."});
+      const eu0 = (await usuarios()).find(u => u.id === uid);
+      if (!s || s.deleted_at || !participa(s, uid, [...nomesDe(eu0), prof.nome])) return res.status(404).json({message: "Venda não encontrada."});
       return res.status(200).json({venda: s, pode_editar: !prazoVencido(s), prazo_dias: PRAZO_DIAS});
     }
     if (b.acao === "clientes"){
