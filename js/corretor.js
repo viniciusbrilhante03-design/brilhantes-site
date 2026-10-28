@@ -1,0 +1,342 @@
+/* Brilhante's Imóveis — recursos de equipe:
+   corretor cadastra e edita as próprias vendas (até 60 dias), cadastra clientes, vê o próprio financeiro e pesquisa loteamentos;
+   gestor: duplas misturadas no ranking e aba "Duplicados" para mesclar cadastros repetidos. */
+"use strict";
+(function(){
+const PRAZO = 60;
+const COR = {clientes: null, eq: null, finFiltro: "abertas", cliQ: "", lotQ: ""};
+async function corAPI(body){
+  const t = await window.__bri.token();
+  const r = await fetch("/api/corretor", {method: "POST", headers: {"Content-Type": "application/json", Authorization: "Bearer " + t}, body: JSON.stringify(body)}).catch(() => null);
+  if (!r) throw Object.assign(new Error("Sem conexão com o site."), {status: 0});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.message || "Não foi possível concluir (" + r.status + ")."), {status: r.status, j});
+  return j;
+}
+const diasDesde = iso => { const t = Date.parse(iso || ""); return isFinite(t) ? Math.floor((Date.now() - t) / 864e5) : null; };
+const podeEditar = v => { const d = diasDesde(v && v.created_at); return d == null || d <= PRAZO; };
+
+/* =================== RANKING: duplas cadastradas entram como uma linha só =================== */
+if (typeof ranking === "function"){
+  const _ranking = ranking;
+  ranking = function(list, kind){
+    const r = _ranking(list, kind);
+    if (kind !== "corretores") return r;
+    const gi = groupIndex(); if (!gi.size) return r;
+    const out = new Map();
+    for (const e of r){
+      const g = gi.get(norm(e.label)) || [...(e.names || [])].map(n => gi.get(norm(n))).find(Boolean);
+      if (!g){ out.set(e.key, e); continue; }
+      const k = "g:" + g.id, o = out.get(k) || {key: k, label: g.name || (g.members || []).join(" + "), members: g.members || [], qtd: 0, vgv: 0, comm: 0, corr: 0, names: new Set(), dupla: true};
+      o.qtd += e.qtd; o.vgv += e.vgv; o.comm += e.comm; o.corr += e.corr; (e.names || []).forEach(n => o.names.add(n)); out.set(k, o);
+    }
+    const by = ui.rankBy === "vgv" ? "vgv" : ui.rankBy === "comm" ? "comm" : "qtd";
+    return [...out.values()].sort((a, b) => b[by] - a[by] || b.vgv - a.vgv);
+  };
+}
+
+/* =================== GESTOR: dados públicos extras para o formulário do corretor =================== */
+if (typeof portalFor === "function"){
+  const _pf = portalFor;
+  portalFor = function(u){ const p = _pf.apply(this, arguments); const by = new Map(allSales().map(s => [s.id, s])); for (const v of p.vendas || []){ const s = by.get(v.id); if (s) v.created_at = s.created_at || null; } return p; };
+}
+if (typeof syncPortals === "function"){
+  const _sync = syncPortals;
+  syncPortals = async function(){
+    const r = await _sync.apply(this, arguments);
+    if (!isAdmin) return r;
+    try {
+      const nomes = [...st.usuarios.values()].filter(u => u.role === "corretor" && u.active !== false && !u.deleted_at).map(u => (u.war_name || u.name || "").trim()).filter(Boolean).sort((a, b) => a.localeCompare(b, "pt-BR"));
+      const regras = {}; for (const [k, v] of Object.entries((rulesDoc() || {}).itens || {})) if (v && v.pct != null) regras[k] = {pct: v.pct};
+      const data = {id: "equipe", itens: nomes.map(nome => ({nome})), regras}, key = JSON.stringify(data);
+      publicarFotos();
+      if (lastPortal.get("publico/equipe") !== key){ wq = wq.then(() => db.doc("publico/equipe").set({...data, updated_at: nowISO()})).then(() => lastPortal.set("publico/equipe", key)).catch(() => {}); }
+    } catch (e){ console.warn("equipe", e); }
+    return r;
+  };
+}
+
+const THUMB = new Map();
+function miniatura(src){
+  if (THUMB.has(src)) return THUMB.get(src);
+  const p = new Promise(ok => { const im = new Image(); im.onload = () => { try { const c = document.createElement("canvas"), z = 96, r = Math.max(z / im.width, z / im.height), w = im.width * r, h = im.height * r; c.width = c.height = z; c.getContext("2d").drawImage(im, (z - w) / 2, (z - h) / 2, w, h); ok(c.toDataURL("image/jpeg", .75)); } catch { ok(null); } }; im.onerror = () => ok(null); im.src = src; });
+  THUMB.set(src, p); return p;
+}
+async function publicarFotos(){
+  const itens = {};
+  for (const u of st.usuarios.values()){ if (u.deleted_at || !u.picture || !String(u.picture).startsWith("data:")) continue; const t = await miniatura(u.picture); if (t) for (const n of [u.war_name, u.name]) if (norm(n)) itens[norm(n)] = t; }
+  for (const b of st.corretores.values()){ if (b.deleted_at || !b.photo || !String(b.photo).startsWith("data:")) continue; const t = await miniatura(b.photo); if (t) for (const n of [b.war_name, b.full_name]) if (norm(n) && !itens[norm(n)]) itens[norm(n)] = t; }
+  const key = JSON.stringify(itens); if (lastPortal.get("publico/fotos") === key) return;
+  wq = wq.then(() => db.doc("publico/fotos").set({id: "fotos", itens, updated_at: nowISO()})).then(() => lastPortal.set("publico/fotos", key)).catch(() => {});
+}
+
+/* =================== GESTOR: aba Duplicados =================== */
+const lev = (a, b) => { if (a === b) return 0; const m = a.length, n = b.length; if (!m || !n) return m || n; let p = Array.from({length: n + 1}, (_, j) => j); for (let i = 1; i <= m; i++){ const c = [i]; for (let j = 1; j <= n; j++) c[j] = Math.min(p[j] + 1, c[j - 1] + 1, p[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); p = c; } return p[n]; };
+const parecido = (a, b) => { const x = lotKey(a), y = lotKey(b); if (!x || !y) return false; if (x === y) return true; if ((x.match(/\d+/g) || []).join(",") !== (y.match(/\d+/g) || []).join(",")) return false; return Math.min(x.length, y.length) >= 6 && lev(x, y) <= (Math.max(x.length, y.length) >= 14 ? 2 : 1); };
+function grupos(itens, liga){ const pai = itens.map((_, i) => i), f = i => pai[i] === i ? i : (pai[i] = f(pai[i])); for (let i = 0; i < itens.length; i++) for (let j = i + 1; j < itens.length; j++) if (liga(itens[i], itens[j])) pai[f(i)] = f(j); const G = new Map(); itens.forEach((x, i) => { const r = f(i); G.set(r, [...(G.get(r) || []), x]); }); return [...G.values()].filter(g => g.length > 1); }
+const DUP = {sel: {}};
+function dupLots(){ return grupos(lotList(), (a, b) => parecido(a.name, b.name)); }
+function dupClientes(){
+  const L = [...st.clientes.values()].filter(c => !c.deleted_at), dig = s => onlyDigits(s);
+  return grupos(L, (a, b) => { const ca = dig(a.cpf), cb = dig(b.cpf); if (ca.length === 11 && ca === cb) return true; const pa = dig(a.phone).slice(-9), pb = dig(b.phone).slice(-9); if (pa.length >= 8 && pa === pb && norm(a.name).split(" ")[0] === norm(b.name).split(" ")[0]) return true; return norm(a.name) && norm(a.name) === norm(b.name); });
+}
+function lotesSemCadastro(){
+  const lots = lotList(), cont = new Map();
+  for (const s of allSales()) if (isActive(s) && s.property_name && !lots.some(l => norm(l.name) === norm(s.property_name))){ const k = norm(s.property_name); const e = cont.get(k) || {nome: s.property_name.trim(), qtd: 0}; e.qtd++; cont.set(k, e); }
+  return [...cont.values()].map(e => ({...e, sugestao: lots.find(l => parecido(l.name, e.nome)) || null})).sort((a, b) => b.qtd - a.qtd);
+}
+function corretoresSemCadastro(){
+  const us = [...st.usuarios.values()].filter(u => !u.deleted_at), cont = new Map();
+  for (const s of allSales()) if (isActive(s)) for (const b of brokersOf(s)){ if (!b.name || b.name === "—") continue; if (us.some(u => [u.war_name, u.name].some(x => norm(x) === norm(b.name)))) continue; const k = norm(b.name); const e = cont.get(k) || {nome: b.name, qtd: 0}; e.qtd++; cont.set(k, e); }
+  return [...cont.values()].map(e => ({...e, sugestao: us.find(u => u.role === "corretor" && [u.war_name, u.name].some(x => x && (norm(x).startsWith(norm(e.nome)) || norm(e.nome).startsWith(norm(x)) || parecido(x, e.nome))))})).sort((a, b) => b.qtd - a.qtd);
+}
+function vazio(v){ return v == null || v === "" || (typeof v === "object" && !Array.isArray(v) && !Object.keys(v).length) || (Array.isArray(v) && !v.length); }
+function completar(a, b){ const o = {...a}; for (const [k, v] of Object.entries(b || {})){ if (["id", "created_at", "updated_at", "deleted_at", "name", "name_lower", "order"].includes(k)) continue; if (vazio(o[k])) o[k] = v; else if (o[k] && typeof o[k] === "object" && !Array.isArray(o[k]) && v && typeof v === "object" && !Array.isArray(v)) o[k] = completar(o[k], v); } return o; }
+function mesclarLots(keep, drops){
+  let nv = 0, nm = 0;
+  for (const d of drops){
+    for (const s of allSales()) if (norm(s.property_name) === norm(d.name) && s.property_name !== keep.name){ const n = {...s, property_name: keep.name}; saveDoc("vendas", n); nv++; }
+    for (const m of st.lot_media.values()) if (m.lot_id === d.id && !m.deleted_at){ saveDoc("lot_media", {...m, lot_id: keep.id}); nm++; }
+    for (const a of st.agenda.values()) if (a.lot && norm(a.lot) === norm(d.name)) saveDoc("agenda", {...a, lot: keep.name});
+    const rd = rulesDoc(), it = {...(rd.itens || {})}; if (it[lotKey(d.name)] && !it[lotKey(keep.name)]){ it[lotKey(keep.name)] = it[lotKey(d.name)]; saveRules(it); }
+    keep = completar(keep, d);
+    saveDoc("loteamentos", {...d, deleted_at: nowISO(), mesclado_em: keep.id});
+  }
+  saveDoc("loteamentos", keep);
+  return {nv, nm};
+}
+function mesclarClientes(keep, drops){
+  let nv = 0;
+  for (const d of drops){
+    for (const s of allSales()) if (norm(s.client_name) === norm(d.name) && norm(d.name) !== norm(keep.name)){ saveDoc("vendas", {...s, client_name: keep.name, client_phone: s.client_phone || keep.phone || "", client_cpf: s.client_cpf || keep.cpf || ""}); nv++; }
+    keep = completar(keep, d);
+    saveDoc("clientes", {...d, deleted_at: nowISO(), mesclado_em: keep.id});
+  }
+  saveDoc("clientes", {...keep, name_key: norm(keep.name), cpf_key: onlyDigits(keep.cpf)});
+  return nv;
+}
+function renomearLoteVendas(nome, lot){ let n = 0; for (const s of allSales()) if (norm(s.property_name) === norm(nome)){ saveDoc("vendas", {...s, property_name: lot.name}); n++; } return n; }
+function renomearCorretorVendas(nome, u){
+  const novo = (u.war_name || u.name).trim(); let n = 0;
+  for (const s of allSales()){
+    const bs = (s.brokers && s.brokers.length) ? s.brokers : [{name: s.broker_name, split_pct: 100, owner_id: s.owner_id}];
+    if (!bs.some(b => norm(b.name) === norm(nome))) continue;
+    const nb = bs.map(b => norm(b.name) === norm(nome) ? {...b, name: novo, owner_id: u.id} : b);
+    saveDoc("vendas", {...s, brokers: nb, broker_ids: nb.map(b => b.owner_id).filter(Boolean), broker_name: nb.map(b => b.name).join(" + "), owner_id: nb[0].owner_id, owner_name: nb[0].name}); n++;
+  }
+  return n;
+}
+function dupHTML(){
+  const lots = dupLots(), cls = dupClientes(), semLot = lotesSemCadastro(), semCor = corretoresSemCadastro();
+  const lotLine = l => `${esc(l.name)} <span style="color:var(--mfg);font-size:12px">· ${lotSales(l).length} vendas · ${lotMedia(l.id).length} arquivos${l.created_at ? " · criado " + dBR(l.created_at) : ""}</span>`;
+  const cliLine = c => `${esc(c.name)} <span style="color:var(--mfg);font-size:12px">· ${esc(fmtPhone(c.phone) || "sem telefone")}${c.cpf ? " · CPF " + esc(c.cpf) : ""} · ${allSales().filter(s => isActive(s) && norm(s.client_name) === norm(c.name)).length} compras</span>`;
+  const grupo = (tipo, g, i, line) => { const k = tipo + i, sel = DUP.sel[k] || g[0].id; return `<div class="card" style="padding:12px;box-shadow:none;display:flex;flex-direction:column;gap:8px">${g.map(x => `<label style="display:flex;gap:10px;align-items:center;cursor:pointer"><input type="radio" name="${k}" value="${esc(x.id)}" data-dsel="${k}" ${x.id === sel ? "checked" : ""}><span>${line(x)}</span></label>`).join("")}<div><button class="btn sm pri" data-mesclar="${tipo}" data-i="${i}">Mesclar no marcado</button></div></div>`; };
+  const sec = (t, n, body, vaz) => `<section class="card"><div class="hd"><h2>${t} <span class="pill ${n ? "p-warn" : "p-ok"}">${n}</span></h2></div><div class="bd" style="display:flex;flex-direction:column;gap:10px">${n ? body : `<div class="empty" style="padding:16px">${vaz}</div>`}</div></section>`;
+  return `<div class="pagehead"><div><h1>Duplicados</h1><p>Mesclar não apaga histórico: as vendas, fotos e documentos passam para o cadastro marcado, e o outro fica guardado como “mesclado”.</p></div></div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+    ${sec("Loteamentos repetidos", lots.length, lots.map((g, i) => grupo("lot", g, i, lotLine)).join(""), "Nenhum loteamento duplicado.")}
+    ${sec("Clientes repetidos", cls.length, cls.map((g, i) => grupo("cli", g, i, cliLine)).join(""), "Nenhum cliente duplicado.")}
+    ${sec("Vendas com loteamento sem cadastro", semLot.length, semLot.map((e, i) => `<div class="card" style="padding:12px;box-shadow:none;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><div style="flex:1 1 220px"><b>${esc(e.nome)}</b> <span style="color:var(--mfg);font-size:12px">· ${e.qtd} vendas</span></div><select data-semlot="${i}" style="flex:0 1 260px"><option value="">Corrigir para…</option>${lotList().map(l => `<option value="${esc(l.id)}" ${e.sugestao && e.sugestao.id === l.id ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select><button class="btn sm pri" data-fixlot="${i}">Corrigir vendas</button></div>`).join(""), "Todas as vendas apontam para um loteamento cadastrado.")}
+    ${sec("Corretores nas vendas sem cadastro", semCor.length, semCor.map((e, i) => `<div class="card" style="padding:12px;box-shadow:none;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><div style="flex:1 1 220px"><b>${esc(e.nome)}</b> <span style="color:var(--mfg);font-size:12px">· ${e.qtd} vendas</span></div><select data-semcor="${i}" style="flex:0 1 260px"><option value="">Corrigir para…</option>${[...st.usuarios.values()].filter(u => !u.deleted_at && u.role === "corretor").sort((a, b) => (a.war_name || a.name || "").localeCompare(b.war_name || b.name || "", "pt-BR")).map(u => `<option value="${esc(u.id)}" ${e.sugestao && e.sugestao.id === u.id ? "selected" : ""}>${esc(u.war_name || u.name)}</option>`).join("")}</select><button class="btn sm pri" data-fixcor="${i}">Corrigir vendas</button></div>`).join(""), "Todos os corretores das vendas estão cadastrados.")}
+    </div>`;
+}
+const Duplicados = {
+  html: () => `<div id="dupRoot"></div>`,
+  bind(){
+    $("#main").onchange = e => { const r = e.target.closest("[data-dsel]"); if (r) DUP.sel[r.dataset.dsel] = r.value; };
+    $("#main").onclick = e => {
+      const b = e.target.closest("[data-mesclar]");
+      if (b){ const tipo = b.dataset.mesclar, i = +b.dataset.i, G = tipo === "lot" ? dupLots() : dupClientes(), g = G[i]; if (!g) return; const keepId = DUP.sel[tipo + i] || g[0].id, keep = g.find(x => x.id === keepId), drops = g.filter(x => x.id !== keepId);
+        if (b.dataset.ok !== "1"){ b.dataset.ok = "1"; b.textContent = `Confirmar: manter “${keep.name}”`; b.classList.add("danger"); return; }
+        if (tipo === "lot"){ const r = mesclarLots(keep, drops); toast(`Loteamentos mesclados · ${r.nv} vendas e ${r.nm} arquivos movidos`); }
+        else { const n = mesclarClientes(keep, drops); toast(`Clientes mesclados${n ? ` · ${n} vendas atualizadas` : ""}`); }
+        delete DUP.sel[tipo + i]; return Duplicados.update(); }
+      const fl = e.target.closest("[data-fixlot]"); if (fl){ const i = +fl.dataset.fixlot, e2 = lotesSemCadastro()[i], id = $(`[data-semlot="${i}"]`).value, lot = lotList().find(l => l.id === id); if (!e2 || !lot) return toast("Escolha o loteamento correto."); const n = renomearLoteVendas(e2.nome, lot); toast(`${n} vendas corrigidas para ${lot.name}`); return Duplicados.update(); }
+      const fc = e.target.closest("[data-fixcor]"); if (fc){ const i = +fc.dataset.fixcor, e2 = corretoresSemCadastro()[i], id = $(`[data-semcor="${i}"]`).value, u = st.usuarios.get(id); if (!e2 || !u) return toast("Escolha o corretor correto."); const n = renomearCorretorVendas(e2.nome, u); toast(`${n} vendas corrigidas para ${u.war_name || u.name}`); return Duplicados.update(); }
+    };
+  },
+  update(){ const r = $("#dupRoot"); if (r) r.innerHTML = dupHTML(); }
+};
+if (typeof TABS !== "undefined" && typeof VIEWS !== "undefined"){
+  const i = TABS.findIndex(t => t[0] === "auditoria");
+  TABS.splice(i >= 0 ? i + 1 : TABS.length, 0, ["duplicados", "Duplicados"]);
+  VIEWS.duplicados = Duplicados;
+}
+
+/* =================== CORRETOR =================== */
+function prepararDadosCorretor(){
+  for (const l of (PUB.lots || [])) if (!st.loteamentos.has(l.id)) st.loteamentos.set(l.id, {id: l.id, name: l.name});
+  const eq = COR.eq || {};
+  for (const x of eq.itens || []) st.corretores.set("eq:" + norm(x.nome), {id: "eq:" + norm(x.nome), war_name: x.nome});
+  const it = {}; for (const [k, v] of Object.entries(eq.regras || {})) it[k] = v;
+  st.config.set("regras_lot", {id: "regras_lot", itens: it});
+  for (const c of COR.clientes || []) st.clientes.set(c.id, c);
+}
+async function carregarClientes(){ try { COR.clientes = (await corAPI({acao: "clientes"})).clientes || []; } catch { COR.clientes = COR.clientes || []; } return COR.clientes; }
+function meusClientes(){
+  const m = new Map();
+  for (const c of COR.clientes || []) m.set(norm(c.name), {nome: c.name, fone: c.phone, email: c.email, reg: c, compras: []});
+  for (const v of (PORTAL && PORTAL.vendas) || []){ const n = (v.client_name || "").trim(); if (!n) continue; const k = norm(n), e = m.get(k) || {nome: n, fone: v.client_phone || "", compras: []}; if (!e.fone) e.fone = v.client_phone || ""; e.compras.push(v); m.set(k, e); }
+  return [...m.values()].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+}
+async function abrirFormVenda(init){
+  prepararDadosCorretor();
+  const eu = (PORTAL && PORTAL.nome) || "";
+  const base = init || {property_name: "", quadra: "", lote: "", client_name: "", client_phone: "", client_email: "", client_cpf: "", client_birthdate: "", sale_date: T, sale_value: 0, financed_value: 0, commission_base: "sale", commission_rate: 0, commission_value: 0, broker_split: 60, brokers: [{name: eu, split_pct: 100}], discounts: [], entrada: 0, parcelado: false, installments: [], commission_received: false, notes: ""};
+  canWrite = true; try { openSaleForm(base); } finally { canWrite = false; }
+  const f = $("#saleForm"); if (!f) return; f.dataset.cor = "1";
+  const dl = $("#dlClients"); if (dl) dl.innerHTML = meusClientes().map(c => `<option value="${esc(c.nome)}">`).join("");
+  const ai = $("#sfAI"); if (ai) ai.remove();
+  const p = f.querySelector(".dh p"); if (p) p.textContent = init ? `Você pode alterar esta venda até ${PRAZO} dias depois do cadastro. Os corretores da venda só o gestor muda.` : `Depois de salvar, você pode editar por até ${PRAZO} dias. Depois disso, só o gestor altera.`;
+  if (init){ $$("#brList input").forEach(i => i.disabled = true); const a = $("#addBr"); if (a) a.hidden = true; $$("#brList [data-rmb]").forEach(b => b.remove()); }
+  else { const first = $('#brList [data-bi="0"][data-k="name"]'); if (first){ first.readOnly = true; first.title = "Você é sempre um dos corretores da venda."; } }
+}
+if (typeof fillClient === "function"){
+  const _fill = fillClient;
+  fillClient = function(name){
+    if (isAdmin) return _fill.apply(this, arguments);
+    const k = norm(name); if (!k) return; const c = meusClientes().find(x => norm(x.nome) === k); if (!c) return;
+    const r = c.reg || {}, v = (c.compras || [])[0] || {};
+    const pick = (fs, fc) => F[fs] || r[fc] || v[fs] || "";
+    F.client_phone = pick("client_phone", "phone"); F.client_email = pick("client_email", "email"); F.client_cpf = pick("client_cpf", "cpf"); F.client_birthdate = pick("client_birthdate", "birthdate");
+    for (const f of ["client_phone", "client_email", "client_cpf", "client_birthdate"]){ const el = $("#sf_" + f); if (el) el.value = F[f] || ""; }
+  };
+}
+if (typeof submitSale === "function"){
+  const _submit = submitSale;
+  submitSale = async function(editing){
+    if (isAdmin || !$("#saleForm") || !$("#saleForm").dataset.cor) return _submit.apply(this, arguments);
+    const err = [], warn = h => { $("#warn").innerHTML = h; $("#warn").scrollIntoView({block: "nearest"}); };
+    if (!String(F.property_name || "").trim()) err.push("Informe o loteamento.");
+    if (!F.sale_date) err.push("Informe a data da venda.");
+    if (!(N(F.sale_value) > 0)) err.push("Informe o valor da venda.");
+    const brokers = F.brokers.filter(b => String(b.name || "").trim());
+    if (!editing && brokers.length > 1 && Math.abs(brokers.reduce((a, b) => a + N(b.split_pct), 0) - 100) > 0.01) err.push("A divisão entre os corretores deve somar 100%.");
+    if (F.commission_base === "financed" && !(N(F.financed_value) > 0)) err.push("Preencha o valor financiado.");
+    if (F.parcelado && !F.installments.length) err.push("Gere as parcelas da comissão.");
+    const ano = +String(F.sale_date || "").slice(0, 4), hoje = +T.slice(0, 4);
+    if (ano && (ano < hoje - 1 || ano > hoje)) err.push(`Confira a data da venda (ano ${ano}).`);
+    if (err.length) return warn(`<div class="alert e">${err.map(esc).join("<br>")}</div>`);
+    const btn = $("#sfSave"); btn.disabled = true; const lbl = btn.textContent; btn.textContent = "Salvando…";
+    try {
+      const venda = {...F, brokers}; delete venda._manualComm; delete venda._force;
+      const r = await corAPI({acao: "venda", venda, confirmar: !!F._force});
+      $("#dlg").close(); toast(editing ? "Venda atualizada" : "Venda cadastrada! O gestor foi avisado.");
+      if (!editing && typeof openCelebration === "function") setTimeout(() => { try { openCelebration(r.venda); } catch {} }, 250);
+    } catch (e){
+      btn.disabled = false; btn.textContent = lbl;
+      if (e.status === 409 && e.j && e.j.confirmar){ F._force = true; btn.textContent = "Salvar mesmo assim"; return warn(`<div class="alert w">${esc(e.message)}<br><b>Clique em salvar de novo para confirmar mesmo assim.</b></div>`); }
+      warn(`<div class="alert e">${esc(e.message)}</div>`);
+    }
+  };
+}
+function formCliente(c){
+  c = c || {name: "", phone: "", email: "", cpf: "", birthdate: "", origin: "", notes: ""};
+  modal(`<form class="dlg" novalidate style="max-width:560px"><div class="dh"><div style="flex:1"><h2>${c.id ? "Editar cliente" : "Novo cliente"}</h2><p>Fica na sua carteira. O gestor também vê.</p></div><button type="button" class="btn icon" data-x aria-label="Fechar">✕</button></div>
+    <div class="db"><div class="g">
+      <label class="f" style="grid-column:1/-1">Nome *<input type="text" name="name" value="${esc(c.name)}" required></label>
+      <label class="f">Telefone<input type="tel" name="phone" value="${esc(c.phone)}"></label>
+      <label class="f">E-mail<input type="email" name="email" value="${esc(c.email)}"></label>
+      <label class="f">CPF<input type="text" name="cpf" value="${esc(c.cpf)}"></label>
+      <label class="f">Nascimento<input type="date" name="birthdate" value="${esc(String(c.birthdate || "").slice(0, 10))}"></label>
+      <label class="f">Origem<select name="origin"><option value="">—</option>${Object.entries(ORIG).map(([k, l]) => `<option value="${k}" ${c.origin === k ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+      <label class="f">Observações<textarea name="notes" rows="3">${esc(c.notes || "")}</textarea></label><div id="cfWarn"></div></div>
+    <div class="df"><button type="button" class="btn" data-x>Cancelar</button><button class="btn pri">Salvar</button></div></form>`, async (fd, f) => {
+      const name = fv(fd, "name"); if (!name) return $("#cfWarn").innerHTML = `<div class="alert e">Informe o nome.</div>`;
+      const cpf = onlyDigits(fv(fd, "cpf"));
+      if (!c.id){ const ex = meusClientes().find(x => norm(x.nome) === norm(name) || (cpf.length === 11 && x.reg && onlyDigits(x.reg.cpf) === cpf)); if (ex && ex.reg) return $("#cfWarn").innerHTML = `<div class="alert w">Você já tem o cliente <b>${esc(ex.nome)}</b> com este nome ou CPF.</div>`; }
+      const b = f.querySelector("button.pri"); b.disabled = true;
+      try { await corAPI({acao: "cliente", cliente: {...c, name, phone: fv(fd, "phone"), email: fv(fd, "email"), cpf: fv(fd, "cpf"), birthdate: fv(fd, "birthdate"), origin: fv(fd, "origin"), notes: fv(fd, "notes")}}); $("#dlg").close(); toast("Cliente salvo"); await carregarClientes(); if (ui.tab === "clientesC") renderCorretor(); }
+      catch (e){ b.disabled = false; $("#cfWarn").innerHTML = `<div class="alert e">${esc(e.message)}</div>`; }
+    });
+}
+function telaClientes(){
+  const L = meusClientes().filter(c => !COR.cliQ || norm(c.nome + " " + (c.fone || "")).includes(norm(COR.cliQ)));
+  return `<div class="pagehead"><div><h1>Meus clientes</h1><p>${L.length} clientes · das suas vendas e da sua carteira</p></div><button class="btn pri" data-novocli>+ Novo cliente</button></div>
+    <section class="card"><div class="bd"><input type="search" id="cliQ" placeholder="Buscar por nome ou telefone" value="${esc(COR.cliQ)}" style="width:100%;margin-bottom:10px">
+    ${L.length ? `<div class="tablewrap"><table><thead><tr><th>Cliente</th><th>Telefone</th><th>Compras</th><th></th></tr></thead><tbody>${L.map(c => `<tr><td><b>${esc(c.nome)}</b>${c.reg ? "" : `<span class="s">só nas vendas</span>`}</td><td>${esc(fmtPhone(c.fone) || "—")}</td><td>${c.compras.length ? c.compras.slice(0, 3).map(v => esc(`${v.property_name} Q${v.quadra || "-"} L${v.lote || "-"}`)).join("<br>") : "—"}</td><td class="r" style="white-space:nowrap">${waLink(c.fone) ? `<a class="btn sm" href="${esc(waLink(c.fone))}" target="_blank" rel="noopener">WhatsApp</a> ` : ""}${c.reg ? `<button class="btn sm" data-editcli="${esc(c.reg.id)}">Editar</button>` : `<button class="btn sm" data-addcli="${esc(c.nome)}">Cadastrar</button>`}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Nenhum cliente ainda. Cadastre o primeiro.</div>`}</div></section>`;
+}
+function statusParcela(i, v){ if (i.received) return ["Recebida", "p-ok"]; if (i.parcial > 0) return ["Parcial", "p-warn"]; if (!i.avista && N(v.venc) > 0 && (i.due_date || "") < T) return ["Vencida", "p-bad"]; return ["A receber", "p-gold"]; }
+async function marcarRecebida(b){
+  const ok = b.dataset.ok === "1";
+  if (!b.dataset.conf){ b.dataset.conf = "1"; b.textContent = ok ? "Confirmar recebimento" : "Confirmar desmarcar"; b.classList.add(ok ? "pri" : "danger"); return; }
+  b.disabled = true; b.textContent = "Salvando…";
+  try {
+    await corAPI({acao: "receber", id: b.dataset.receber, parcela: +b.dataset.parc || 0, recebida: ok});
+    const v = ((PORTAL && PORTAL.vendas) || []).find(x => x.id === b.dataset.receber);
+    if (v){ const n = +b.dataset.parc; if (n && v.installments){ const i = v.installments.find(x => x.number === n); if (i){ i.received = ok; i.received_date = ok ? T : null; } v.rec = v.installments.reduce((a, x) => a + (x.received ? N(x.value) : 0), 0); } else { v.commission_received = ok; v.rec = ok ? v.comm : 0; } }
+    toast(ok ? "Marcado como recebido. O gestor foi avisado." : "Recebimento desmarcado."); renderCorretor();
+  } catch (e){ toast(e.message); b.disabled = false; b.textContent = ok ? "Recebi" : "Desmarcar"; delete b.dataset.conf; }
+}
+function telaFinanceiro(){
+  const V = ((PORTAL && PORTAL.vendas) || []).filter(v => !v.cancelled), rows = [];
+  for (const v of V){
+    if (v.installments && v.installments.length) v.installments.forEach(i => rows.push({v, num: i.number, due: i.due_date, valor: N(i.value), pago: i.received ? N(i.value) : N(i.parcial), st: statusParcela(i, v), n: v.installments.length === 1 && i.due_date === v.sale_date ? "à vista" : `${i.number}/${v.installments.length}`}));
+    else rows.push({v, due: v.sale_date, valor: N(v.comm), pago: v.commission_received ? N(v.comm) : N(v.rec), st: (v.commission_received || (v.rec >= v.comm - .01 && v.comm)) ? ["Recebida", "p-ok"] : v.rec > 0 ? ["Parcial", "p-warn"] : ["A receber", "p-gold"], n: "à vista"});
+  }
+  const m = ui.month, y = ui.year, noPer = r => (!y || String(r.due || "").startsWith(String(y))) && (!m || +String(r.due || "").slice(5, 7) === m);
+  const P = rows.filter(r => noPer(r) && (r.valor > 0.005 || r.pago > 0.005)), f = COR.finFiltro;
+  const L = P.filter(r => f === "todas" || (f === "abertas" && r.st[0] !== "Recebida") || (f === "vencidas" && r.st[0] === "Vencida") || (f === "recebidas" && r.st[0] === "Recebida")).sort((a, b) => (a.due || "").localeCompare(b.due || ""));
+  const tot = P.reduce((a, r) => ({total: a.total + r.valor, rec: a.rec + r.pago, venc: a.venc + (r.st[0] === "Vencida" ? r.valor - r.pago : 0)}), {total: 0, rec: 0, venc: 0});
+  return `<div class="pagehead"><div><h1>Meu financeiro</h1><p>${esc(periodLabel())} · parcelas da sua comissão pelo vencimento</p></div></div>
+    <section class="kpis">${[["Minha comissão no período", brl(tot.total), "var(--gold)"], ["Já recebi", brl(tot.rec), "var(--ok)"], ["Falta receber", brl(tot.total - tot.rec), "var(--warn)"], ["Vencido", brl(tot.venc), "var(--bad)"]].map(([l, v, c]) => `<div class="card kpi" style="--c:${c}"><span class="lbl"><i class="dot"></i>${l}</span><span class="val num">${v}</span></div>`).join("")}</section>
+    <section class="card"><div class="bd"><div class="toolbar" style="margin-bottom:10px">${[["abertas", "A receber"], ["vencidas", "Vencidas"], ["recebidas", "Recebidas"], ["todas", "Todas"]].map(([k, l]) => `<button class="btn sm ${f === k ? "pri" : ""}" data-fin="${k}">${l}</button>`).join("")}</div>
+    ${L.length ? `<div class="tablewrap"><table><thead><tr><th>Vencimento</th><th>Venda</th><th>Parcela</th><th class="r">Minha parte</th><th class="r">Recebido</th><th>Status</th><th></th></tr></thead><tbody>${L.map(r => `<tr data-v="${esc(r.v.id)}" style="cursor:pointer"><td class="num">${dBR(r.due)}</td><td><b>${esc(r.v.property_name)}</b><span class="s">Q ${esc(r.v.quadra) || "–"} · L ${esc(r.v.lote) || "–"} · ${esc(r.v.client_name) || "—"}</span></td><td>${esc(r.n)}</td><td class="r num">${brl(r.valor)}</td><td class="r num">${brl(r.pago)}</td><td><span class="pill ${r.st[1]}">${r.st[0]}</span></td><td class="r"><button class="btn sm ${r.st[0] === "Recebida" ? "" : "pri"}" data-receber="${esc(r.v.id)}" data-parc="${r.num || 0}" data-ok="${r.st[0] === "Recebida" ? 0 : 1}">${r.st[0] === "Recebida" ? "Desmarcar" : "Recebi"}</button></td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Nada neste filtro e período.</div>`}
+    <p style="color:var(--mfg);font-size:12px;margin:10px 0 0">Ao marcar “Recebi”, o gestor é avisado e a baixa fica registrada na Auditoria. Vendas recém-cadastradas aparecem com valores estimados até o gestor abrir o sistema.</p></div></section>`;
+}
+if (typeof bootCorretor === "function"){
+  const _boot = bootCorretor, _render = renderCorretor, _openV = openVendaC;
+  bootCorretor = async function(){
+    const r = await _boot.apply(this, arguments);
+    const tabs = $("#tabs");
+    if (tabs && !tabs.querySelector('[data-tab="clientesC"]')){ const ref = tabs.querySelector('[data-tab="vendasC"]'); (ref || tabs.lastElementChild).insertAdjacentHTML("afterend", `<button role="tab" data-tab="clientesC" aria-selected="false">Meus clientes</button><button role="tab" data-tab="finC" aria-selected="false">Meu financeiro</button>`); }
+    try { db.doc("publico/equipe").onSnapshot(s => { COR.eq = s.exists ? s.data() : null; }, () => {}); } catch {}
+    try { db.doc("publico/fotos").onSnapshot(s => { COR.fotos = s.exists ? (s.data().itens || {}) : {}; if (ui.tab === "rankC" || ui.tab === "meu") renderCorretor(); }, () => {}); } catch {}
+    carregarClientes();
+    return r;
+  };
+  renderCorretor = function(){
+    if (!PORTAL || (ui.tab !== "clientesC" && ui.tab !== "finC")){
+      const r = _render.apply(this, arguments);
+      if (PORTAL) decorar();
+      return r;
+    }
+    $("#main").innerHTML = ui.tab === "clientesC" ? telaClientes() : telaFinanceiro();
+    const q = $("#cliQ"); if (q){ q.oninput = () => { COR.cliQ = q.value; const pos = q.selectionStart; renderCorretor(); const n = $("#cliQ"); if (n){ n.focus(); n.setSelectionRange(pos, pos); } }; }
+    $("#main").onclick = e => {
+      if (e.target.closest("[data-novocli]")) return formCliente();
+      const ed = e.target.closest("[data-editcli]"); if (ed) return formCliente((COR.clientes || []).find(c => c.id === ed.dataset.editcli));
+      const ad = e.target.closest("[data-addcli]"); if (ad){ const c = meusClientes().find(x => x.nome === ad.dataset.addcli) || {}; return formCliente({name: ad.dataset.addcli, phone: c.fone || "", email: "", cpf: "", birthdate: "", origin: "", notes: ""}); }
+      const fb = e.target.closest("[data-fin]"); if (fb){ COR.finFiltro = fb.dataset.fin; return renderCorretor(); }
+      const rb = e.target.closest("[data-receber]"); if (rb){ e.stopPropagation(); return marcarRecebida(rb); }
+      const tr = e.target.closest("tr[data-v]"); if (tr) return openVendaC(((PORTAL && PORTAL.vendas) || []).find(v => v.id === tr.dataset.v));
+    };
+  };
+  function fotoDe(nome){ const F2 = COR.fotos || {}; return F2[norm(nome)] || null; }
+  function decorar(){
+    if ((ui.tab === "rankC" || ui.tab === "meu") && COR.fotos){
+      $$("#main ol.rank li").forEach(li => { const av = li.querySelector(".av"), nm = li.querySelector(".nm"), meta = li.querySelector(".meta"); if (!av || !nm || av.querySelector("img")) return;
+        const label = nm.textContent.replace(/\s*\(você\)\s*$/, ""), membros = meta ? meta.textContent.split(" & ") : [];
+        const f = fotoDe(label) || membros.map(fotoDe).find(Boolean); if (f) av.innerHTML = `<img alt="" src="${esc(f)}">`;
+        if (PORTAL && membros.some(m => norm(m) === norm(PORTAL.nome)) && !/\(você\)/.test(nm.textContent)){ nm.insertAdjacentText("beforeend", " (você)"); li.style.background = "var(--goldbg)"; li.style.borderRadius = "8px"; } });
+    }
+    const head = $("#main .pagehead");
+    if ((ui.tab === "vendasC" || ui.tab === "meu") && head && !head.querySelector("[data-novavenda]")){ head.insertAdjacentHTML("beforeend", `<button class="btn pri" data-novavenda>+ Nova venda</button>`); head.querySelector("[data-novavenda]").onclick = () => abrirFormVenda(); }
+    if (ui.tab === "lotsC" && head && !$("#lotQ")){
+      head.insertAdjacentHTML("afterend", `<input type="search" id="lotQ" placeholder="Pesquisar loteamento, cidade ou bairro" value="${esc(COR.lotQ)}" style="width:100%;margin:0 0 12px">`);
+      const filtrar = () => { const q = norm(COR.lotQ); let n = 0; $$("#main [data-lc]").forEach(b => { const l = (PUB.lots || []).find(x => x.id === b.dataset.lc) || {}, loc = ((l.specs || {}).localizacao) || {}; const ok = !q || norm([l.name, loc.cidade, loc.bairro].join(" ")).includes(q); b.hidden = !ok; if (ok) n++; }); const p = $("#main .pagehead p"); if (p) p.textContent = q ? `${n} de ${(PUB.lots || []).length} loteamentos` : `${(PUB.lots || []).length} loteamentos · fichas, fotos, documentos e copys`; };
+      $("#lotQ").oninput = e => { COR.lotQ = e.target.value; filtrar(); }; filtrar();
+    }
+  }
+  openVendaC = function(v){
+    const r = _openV.apply(this, arguments);
+    if (!v || isAdmin) return r;
+    const db2 = $("#sheet .db"); if (!db2) return r;
+    const d = diasDesde(v.created_at), ok = podeEditar(v);
+    db2.insertAdjacentHTML("afterbegin", `<div class="toolbar" style="align-items:center">${ok ? `<button class="btn pri sm" data-editarvenda>Editar venda</button><span style="color:var(--mfg);font-size:12px">${d != null ? `Editável por mais ${Math.max(PRAZO - d, 0)} dias` : ""}</span>` : `<span class="pill p-mut">Cadastrada há mais de ${PRAZO} dias · só o gestor altera</span>`}</div>`);
+    const b = db2.querySelector("[data-editarvenda]");
+    if (b) b.onclick = async () => { b.disabled = true; b.textContent = "Abrindo…"; try { const j = await corAPI({acao: "venda_ler", id: v.id}); if (!j.pode_editar){ toast(`Cadastrada há mais de ${PRAZO} dias. Só o gestor altera.`); return; } $("#sheet").close(); abrirFormVenda(j.venda); } catch (e){ toast(e.message); } finally { b.disabled = false; b.textContent = "Editar venda"; } };
+    return r;
+  };
+}
+})();

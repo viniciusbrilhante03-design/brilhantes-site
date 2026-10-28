@@ -127,7 +127,7 @@ const CSS = `
 .bia-panel.open{transform:none;visibility:visible}
 .bia-panel .hero{position:relative;height:200px;background:#141414 center/cover;flex:0 0 auto}
 .bia-panel .hero:after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.1),rgba(7,9,10,.95))}
-.bia-panel .hero div{position:absolute;left:16px;bottom:12px;right:16px;z-index:1}
+.bia-panel .hero>div{position:absolute;left:16px;bottom:12px;right:16px;z-index:1}
 .bia-panel .hero b{display:block;margin-bottom:4px;font-size:20px;font-family:Georgia,serif;letter-spacing:.03em;color:#FFF3D6}
 .bia-panel .close{position:absolute;top:10px;right:10px;z-index:2;background:rgba(0,0,0,.6);border:1px solid var(--line);border-radius:10px;width:34px;height:34px;cursor:pointer;color:#fff}
 .bia-ptabs{display:flex;gap:4px;overflow-x:auto;padding:8px 12px;border-bottom:1px solid var(--line);flex:0 0 auto}
@@ -411,7 +411,7 @@ const UIB = {
   lots: b => { const L = b.ids.map(id => D.lots().find(l => l.id === id)).filter(Boolean); return L.length ? `<div class="bia-cards" ${b.tab ? `data-tab="${E(b.tab)}"` : ""}>${L.map(l => lotCard(l, b.sel && b.sel.includes(l.id))).join("")}</div>${b.pick ? `<div class="bia-chips"><button class="bia-chip red" data-act="comparar_ok">Comparar selecionados</button></div>` : ""}` : `<div class="bia-box" style="color:var(--mut)">Nenhum loteamento encontrado.</div>`; },
   lotResumo: b => { const l = D.lots().find(x => x.id === b.id); if (!l) return ""; return `<div class="bia-box"><div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">${l.cover ? `<img src="${E(l.cover)}" alt="" style="width:74px;height:56px;object-fit:cover;border-radius:9px">` : ""}<div><b style="font-size:15px">${E(l.name)}</b><div style="color:var(--mut);font-size:12px">${ic("pin", 12)} ${E([l.bairro, l.cidade, l.estado].filter(Boolean).join(" · "))}</div></div></div>
       <div class="bia-kv">${[["Lotes", l.tec.metragem_min ? `${l.tec.metragem_min}${l.tec.metragem_max ? " a " + l.tec.metragem_max : ""} m²` : ""], ["A partir de", l.com.valor_a_partir ? money(l.com.valor_a_partir) : ""], ["Entrada", l.com.entrada_minima ? money(l.com.entrada_minima) : ""], ["Parcelas", l.com.max_parcelas ? "até " + l.com.max_parcelas + "x" : ""], ["Financiamento", l.com.financiamento || ""], ["Obra", OBRA[l.obra.status] || ""]].filter(x => x[1]).map(([k, v]) => `<div><span>${k}</span><b>${E(v)}</b></div>`).join("")}</div>
-      <div class="bia-chips" style="margin-top:8px"><button class="bia-chip red" data-lot="${E(l.id)}">Ver ficha completa</button><button class="bia-chip" data-lot="${E(l.id)}" data-tab="precos">Tabela de preços</button><button class="bia-chip" data-lot="${E(l.id)}" data-tab="disp">Disponibilidade</button><button class="bia-chip" data-lot="${E(l.id)}" data-tab="visita">Agendar visita</button></div></div>`; },
+      <div class="bia-chips" style="margin-top:8px"><button class="bia-chip red" data-lot="${E(l.id)}">Ver ficha completa</button><button class="bia-chip" data-lot="${E(l.id)}" data-tab="precos">Tabela de preços</button><button class="bia-chip" data-lot="${E(l.id)}" data-tab="visita">Agendar visita</button></div></div>`; },
   precos: b => { const l = D.lots().find(x => x.id === b.id); return l ? `<div class="bia-box"><h5>Tabela de preços · ${E(l.name)}</h5>${precoHTML(l)}</div>` : ""; },
   comissoes: b => { const c = D.comissoes(b.m, b.y); return `<div class="bia-box"><h5>Comissões${b.y ? " · " + (+b.m ? MESES[b.m - 1] + "/" : "") + b.y : ""}</h5>
       <div class="bia-tile t-ok"><span>🟢 Pagas</span><b>${brl(c.pagas)}</b></div><div class="bia-tile t-wait"><span>🟡 A receber</span><b>${brl(c.aReceber)}</b></div><div class="bia-tile t-run"><span>🔵 Em andamento</span><b>${c.andamento} vendas</b></div>${c.vencido > 0.01 ? `<div class="bia-tile" style="border-color:rgba(225,37,27,.5);background:rgba(225,37,27,.08)"><span>🔴 Vencido</span><b style="color:#FF7A6E">${brl(c.vencido)}</b></div>` : ""}
@@ -421,24 +421,17 @@ const UIB = {
       <table class="bia-tbl" style="margin-top:8px"><tr><th>Parcela</th><th>Vencimento</th><th>Sua parte</th><th>Status</th></tr>${(v.installments || []).map(i => `<tr><td>${i.number}</td><td>${dBR(i.due_date)}</td><td class="v">${brl(i.value)}</td><td>${i.received ? "✅ recebida" : (i.due_date || "") < T ? "🔴 vencida" : "🟡 a receber"}</td></tr>`).join("")}</table></div>`; },
   tarefas: b => tarefasHTML(b),
   clientes: b => { const q = norm(b.q || ""); const L = D.clientes().filter(c => !q || norm(c.nome).includes(q)); return `<div class="bia-box"><h5>Clientes (${L.length})</h5>${L.slice(0, 30).map(c => { const w = waLink(c.fone, `Olá ${c.nome.split(" ")[0]}, tudo bem? Aqui é ${D.nome()}, da Brilhante's Imóveis.`); return `<div class="bia-li" style="cursor:default"><span class="bia-av">${E(iniciais(c.nome))}</span><span style="flex:1;min-width:0"><b style="font-weight:600">${E(c.nome)}</b><small style="display:block;color:var(--mut)">${c.fone ? E(fmtPhone(c.fone)) + " · " : ""}${c.compras.length ? E(c.compras.map(v => v.property_name).join(", ")) : "na agenda"}</small></span>${w ? `<a class="bia-ib" href="${E(w)}" target="_blank" rel="noopener" title="WhatsApp" style="color:#5BE39A">${ic("wa", 16)}</a>` : ""}<button class="bia-ib" data-act="retorno" data-arg="${E(c.nome)}" title="Agendar retorno">${ic("ag", 16)}</button></div>`; }).join("") || `<span style="color:var(--mut)">Nenhum cliente encontrado.</span>`}</div>`; },
-  comparar: b => { const L = b.ids.map(id => D.lots().find(l => l.id === id)).filter(Boolean); if (L.length < 2) return ""; const rows = [["Cidade", l => [l.bairro, l.cidade].filter(Boolean).join(" · ")], ["Tipo", l => l.tipo === "fechado" ? "Fechado" : l.tipo === "aberto" ? "Aberto" : ""], ["Lotes (m²)", l => l.tec.metragem_min ? `${l.tec.metragem_min}${l.tec.metragem_max ? "–" + l.tec.metragem_max : ""}` : ""], ["A partir de", l => l.com.valor_a_partir ? money(l.com.valor_a_partir) : ""], ["Entrada", l => l.com.entrada_minima ? money(l.com.entrada_minima) : ""], ["Parcelas", l => l.com.max_parcelas ? l.com.max_parcelas + "x" : ""], ["Parcela inicial", l => l.com.valor_parcela_inicial ? money(l.com.valor_parcela_inicial) : ""], ["Juros", l => l.com.juros === "sem" ? "Sem juros" : l.com.juros === "com" ? "Com juros" : ""], ["Correção", l => ({ipca: "IPCA", igpm: "IGP-M", sem: "Sem correção"})[l.com.correcao] || ""], ["Obra", l => OBRA[l.obra.status] || ""], ["Entrega", l => l.obra.previsao || dBR(l.obra.data_entrega) || ""], ["Infraestrutura", l => l.infra.length ? l.infra.length + " itens" : ""], ["Vendidos no sistema", l => l.vendidos != null ? String(l.vendidos) : ""]];
+  comparar: b => { const L = b.ids.map(id => D.lots().find(l => l.id === id)).filter(Boolean); if (L.length < 2) return ""; const rows = [["Cidade", l => [l.bairro, l.cidade].filter(Boolean).join(" · ")], ["Tipo", l => l.tipo === "fechado" ? "Fechado" : l.tipo === "aberto" ? "Aberto" : ""], ["Lotes (m²)", l => l.tec.metragem_min ? `${l.tec.metragem_min}${l.tec.metragem_max ? "–" + l.tec.metragem_max : ""}` : ""], ["A partir de", l => l.com.valor_a_partir ? money(l.com.valor_a_partir) : ""], ["Entrada", l => l.com.entrada_minima ? money(l.com.entrada_minima) : ""], ["Parcelas", l => l.com.max_parcelas ? l.com.max_parcelas + "x" : ""], ["Parcela inicial", l => l.com.valor_parcela_inicial ? money(l.com.valor_parcela_inicial) : ""], ["Juros", l => l.com.juros === "sem" ? "Sem juros" : l.com.juros === "com" ? "Com juros" : ""], ["Correção", l => ({ipca: "IPCA", igpm: "IGP-M", sem: "Sem correção"})[l.com.correcao] || ""], ["Obra", l => OBRA[l.obra.status] || ""], ["Entrega", l => l.obra.previsao || dBR(l.obra.data_entrega) || ""], ["Infraestrutura", l => l.infra.length ? l.infra.length + " itens" : ""]];
       return `<div class="bia-box" style="overflow-x:auto"><h5>Comparativo</h5><table class="bia-tbl bia-cmp"><tr><th></th>${L.map(l => `<th style="color:#fff">${E(l.name)}</th>`).join("")}</tr>${rows.map(([k, f]) => `<tr><th>${k}</th>${L.map(l => `<td class="v">${E(f(l) || "—")}</td>`).join("")}</tr>`).join("")}</table></div>`; },
   ranking: () => { const r = D.ranking(); return `<div class="bia-box"><h5>Ranking de ${MESES[+T.slice(5, 7) - 1]}</h5>${r.slice(0, 10).map((x, i) => `<div class="bia-li" style="cursor:default"><span class="bia-av" style="${i < 3 ? "border-color:var(--g);color:var(--g)" : ""}">${i + 1}º</span><span style="flex:1">${E(x.label)}</span><b style="font-variant-numeric:tabular-nums">${fmtQ(x.qtd)} vendas</b></div>`).join("") || `<span style="color:var(--mut)">Ranking indisponível.</span>`}</div>`; },
   form: b => FORMS[b.f] ? FORMS[b.f](b) : ""
 };
 function precoHTML(l){
-  const C = l.com, rows = [["Valor a partir de", C.valor_a_partir && money(C.valor_a_partir)], ["Valor de referência", C.valor_ref && money(C.valor_ref)], ["Tamanho dos lotes", l.tec.metragem_min && `${l.tec.metragem_min}${l.tec.metragem_max ? " a " + l.tec.metragem_max : ""} m²`], ["Entrada mínima", C.entrada_minima && money(C.entrada_minima)], ["Máximo de parcelas", C.max_parcelas && C.max_parcelas + "x"], ["Parcela inicial", C.valor_parcela_inicial && money(C.valor_parcela_inicial)], ["Financiamento", C.financiamento], ["Correção", ({ipca: "IPCA", igpm: "IGP-M", sem: "Sem correção", outro: C.correcao_outro || "Outro"})[C.correcao]], ["Juros", C.juros === "sem" ? "Sem juros" : C.juros === "com" ? `Com juros${C.juros_pct ? " (" + C.juros_pct + "%)" : ""}` : ""], ["Balões", C.balao === "possui" ? `${C.baloes_qtd ? C.baloes_qtd + " balões" : "Possui"}${C.baloes_valor ? " de " + money(C.baloes_valor) : ""}${C.baloes_periodicidade ? " · " + C.baloes_periodicidade : ""}` : C.balao === "nao" ? "Não" : ""], ["Disponibilidade", disponHTML(l, true)]].filter(r => r[1]);
+  const C = l.com, rows = [["Valor a partir de", C.valor_a_partir && money(C.valor_a_partir)], ["Valor de referência", C.valor_ref && money(C.valor_ref)], ["Tamanho dos lotes", l.tec.metragem_min && `${l.tec.metragem_min}${l.tec.metragem_max ? " a " + l.tec.metragem_max : ""} m²`], ["Entrada mínima", C.entrada_minima && money(C.entrada_minima)], ["Máximo de parcelas", C.max_parcelas && C.max_parcelas + "x"], ["Parcela inicial", C.valor_parcela_inicial && money(C.valor_parcela_inicial)], ["Financiamento", C.financiamento], ["Correção", ({ipca: "IPCA", igpm: "IGP-M", sem: "Sem correção", outro: C.correcao_outro || "Outro"})[C.correcao]], ["Juros", C.juros === "sem" ? "Sem juros" : C.juros === "com" ? `Com juros${C.juros_pct ? " (" + C.juros_pct + "%)" : ""}` : ""], ["Balões", C.balao === "possui" ? `${C.baloes_qtd ? C.baloes_qtd + " balões" : "Possui"}${C.baloes_valor ? " de " + money(C.baloes_valor) : ""}${C.baloes_periodicidade ? " · " + C.baloes_periodicidade : ""}` : C.balao === "nao" ? "Não" : ""]].filter(r => r[1]);
   const tabs = l.docs.filter(m => m.category === "tabela_preco" || /tabela|pre[cç]o/i.test(m.title || ""));
-  return `${rows.length ? `<div class="bia-kv">${rows.map(([k, v]) => `<div><span>${k}</span><b>${k === "Disponibilidade" ? v : E(v)}</b></div>`).join("")}</div>` : `<p style="color:var(--mut);margin:0">As condições comerciais deste loteamento ainda não foram cadastradas na ficha.</p>`}
+  return `${rows.length ? `<div class="bia-kv">${rows.map(([k, v]) => `<div><span>${k}</span><b>${E(v)}</b></div>`).join("")}</div>` : `<p style="color:var(--mut);margin:0">As condições comerciais deste loteamento ainda não foram cadastradas na ficha.</p>`}
     ${C.condicoes_especiais ? `<div style="margin-top:8px;font-size:12.5px"><b style="color:var(--g)">Condições especiais:</b> ${E(C.condicoes_especiais)}</div>` : ""}
     ${tabs.length ? `<div class="bia-chips" style="margin-top:10px">${tabs.map(m => `<a class="bia-chip red" href="${E(blobUrl(m))}" target="_blank" rel="noopener" style="text-decoration:none">📄 ${E(m.title || "Tabela de preços")}</a>`).join("")}</div>` : ""}`;
-}
-function disponHTML(l, curto){
-  const tot = parseInt(String(l.tec.qtd_lotes || "").replace(/\D/g, "")) || 0, v = l.vendidos || 0;
-  if (curto) return tot ? `${Math.max(tot - v, 0)} de ${tot} lotes` : (v ? `${v} vendidos pela Brilhante's` : "");
-  return `<div class="bia-kv"><div><span>Total de lotes</span><b>${tot || "—"}</b></div><div><span>Vendidos pela Brilhante's</span><b>${v}</b></div></div>
-    ${(l.vendidosQL || []).length ? `<div style="margin-top:8px"><span style="font-size:11.5px;color:var(--mut)">Quadras e lotes já vendidos pela equipe:</span><div style="margin-top:6px">${l.vendidosQL.slice(0, 120).map(([q, lt]) => `<span class="bia-pill">Q${E(q || "–")} L${E(lt || "–")}</span>`).join("")}</div></div>` : ""}
-    <p style="font-size:11.5px;color:var(--mut);margin:8px 0 0">A disponibilidade exata (incluindo vendas de outras imobiliárias) deve ser confirmada na tabela da construtora ou com o gestor.</p>`;
 }
 function tarefasHTML(b){
   const all = D.agendaItems().sort((x, y) => (x.when || "").localeCompare(y.when || "")), now = T;
@@ -462,7 +455,7 @@ const FORMS = {
 };
 
 /* ================= painel de detalhes do loteamento ================= */
-const PTABS = [["geral", "Visão geral"], ["precos", "Tabela de preços"], ["disp", "Disponibilidade"], ["local", "Localização"], ["midia", "Fotos e vídeos"], ["visita", "Agendar visita"]];
+const PTABS = [["geral", "Visão geral"], ["precos", "Tabela de preços"], ["local", "Localização"], ["midia", "Fotos e vídeos"], ["visita", "Agendar visita"]];
 function openLot(id, tab){
   const l = D.lots().find(x => x.id === id); const p = document.getElementById("biaPanel"); if (!l || !p) return;
   BIA.panel = {id, tab: tab || "geral"};
@@ -484,7 +477,6 @@ function paintPanel(){
       ${l.resumo || l.ai_training ? `<div class="bia-box"><h5>Informações importantes</h5><div style="font-size:12.5px;white-space:pre-wrap;line-height:1.55">${md(l.resumo || l.ai_training)}</div></div>` : ""}
       <div class="bia-chips"><button class="bia-chip red" data-q="Me explique o ${E(l.name)} de forma resumida para eu passar ao cliente">Perguntar à IA</button><button class="bia-chip" data-copy="${E(l.id)}">Copiar resumo p/ WhatsApp</button><button class="bia-chip" data-ptab="visita">Agendar visita</button></div>`;
   } else if (P.tab === "precos") h = `<div class="bia-box"><h5>Tabela de preços</h5>${precoHTML(l)}</div>`;
-  else if (P.tab === "disp") h = `<div class="bia-box"><h5>Disponibilidade</h5>${disponHTML(l)}</div>`;
   else if (P.tab === "local"){
     const c = l.c, raw = (isAdmin ? slimLots() : (PUB.lots || []));
     h = `<div class="bia-box"><h5>Localização</h5>${kv([["Endereço", l.loc.endereco], ["Bairro", l.bairro], ["Cidade", [l.cidade, l.estado].filter(Boolean).join(" - ")], ["Distância do centro", l.loc.dist_centro], ["Distância da praia", l.loc.dist_praia], ["Pontos de referência", l.loc.dist_pontos]])}
@@ -519,30 +511,82 @@ async function act(a, arg){
   if (a === "novatarefa"){ await pushAI(arg === "visita" ? "Vamos agendar a visita. Preencha os dados:" : "Nova tarefa:", [{t: "form", f: "tarefa", tipo: arg || "outro"}], {speak: false}); return; }
   if (a === "retorno"){ await pushAI(`Agendar retorno para **${arg}**:`, [{t: "form", f: "tarefa", tipo: "ligacao", cliente: arg}], {speak: false}); return; }
   if (a === "clientes"){ const n = D.clientes().length; setState("respondendo"); await pushAI(n ? `Você tem **${n} clientes** nas suas vendas e na agenda. Toque no WhatsApp para falar com eles ou agende um retorno.` : "Ainda não encontrei clientes nas suas vendas.", [{t: "clientes"}], {speak: false}); return setState("finalizado"); }
-  if (a === "duvidas"){ setState("respondendo"); await pushAI("Pode perguntar o que quiser sobre os loteamentos. Eu respondo **somente com as informações cadastradas** no sistema. Exemplos:", [{t: "chips", items: [["Qual o tamanho dos lotes do BS Parc?"], ["Qual a entrada mínima do Vivenza?"], ["Quais loteamentos têm financiamento próprio?"], ["Qual a diferença entre o Vivenza e o BS Parc?"], ["Quais loteamentos são fechados?"]]}], {speak: false}); return setState("finalizado"); }
+  if (a === "duvidas"){ setState("respondendo"); await pushAI("Pode perguntar sobre loteamentos ou pedir ajuda numa venda: objeção, mensagem de WhatsApp, follow-up, fechamento. Eu uso **somente as informações cadastradas** no sistema. Exemplos:", [{t: "chips", items: [["Me ajuda a vender o BS Parc"], ["O cliente achou caro. Como eu respondo?"], ["Mensagem para cliente que sumiu"], ["Qual a correção das parcelas do Vivenza?"], ["Qual é melhor pra quem quer construir logo?"], ["Quais loteamentos são fechados?"]]}], {speak: false}); return setState("finalizado"); }
   if (a === "comparar"){ BIA.pick = []; setState("respondendo"); await pushAI("Toque em **2 ou 3 loteamentos** para selecionar e depois em *Comparar selecionados*.", [{t: "lots", ids: lots.map(l => l.id), pick: true}], {speak: false}); return setState("finalizado"); }
   if (a === "comparar_ok"){ const ids = BIA.pick || []; if (ids.length < 2) return toast("Selecione pelo menos 2 loteamentos."); BIA.pick = null; setState("respondendo"); await pushAI("Aqui está o comparativo lado a lado:", [{t: "comparar", ids: ids.slice(0, 3)}], {speak: false}); return setState("finalizado"); }
 }
 
 /* ================= IA (texto) ================= */
-function sysPrompt(){
+/* ================= inteligência comercial compartilhada (Brilhante's IA + Assistente IA) ================= */
+function copilotoPrompt(canal){
   const dia = new Date(T + "T12:00:00").toLocaleDateString("pt-BR", {weekday: "long"});
-  return `Você é a Brilhante's IA, a assistente exclusiva dos corretores da Brilhante's Imóveis (imobiliária de loteamentos no Ceará). Está falando com o corretor ${D.nome()}. Hoje é ${dia}, ${dBR(T)}.
-REGRAS:
-- Use SOMENTE informações obtidas pelas ferramentas. Nunca invente preços, prazos, metragens, condições ou disponibilidade. Se algo não estiver cadastrado, diga claramente que essa informação não consta no sistema e sugira confirmar com o gestor.
-- Sempre que a pergunta envolver loteamentos, preços, comissões, agenda ou clientes, chame a ferramenta adequada ANTES de responder. Os cards e tabelas aparecem automaticamente abaixo da sua resposta, então NÃO repita listas longas: responda em no máximo 5 linhas, de forma direta, como um assistente experiente.
-- Para agendar visitas, ligações ou tarefas, use criar_tarefa com data e hora no formato AAAA-MM-DDTHH:MM (horário de Fortaleza). Se o corretor não disser a hora, use 09:00.
-- Você só tem acesso às vendas e comissões do próprio corretor. Não fale de comissões de outras pessoas.
-- Responda em português do Brasil, em tom profissional e cordial. Valores em reais no formato R$ 1.234,56.`;
+  const gestor = !!isAdmin, prev = gestor && canal === "bia" ? D.previewUser() : null;
+  const quem = gestor
+    ? `Você está falando com o GESTOR da imobiliária (Vinicius Brilhante). Ele tem acesso a todos os dados: vendas de toda a equipe, comissões, clientes, ranking, agenda e loteamentos.${prev ? ` Na tela ele está pré-visualizando como o corretor ${prev.name}: as ferramentas "minhas_*"/"meus_*" e "minha_agenda" trazem os dados desse corretor; para a equipe toda use listar_vendas, resumo_periodo, ranking, comissoes_em_aberto, buscar_cliente e agenda_equipe.` : ""}`
+    : `Você está falando com o corretor ${D.nome()}. Você só enxerga as vendas, comissões, clientes e agenda DELE. Nunca fale de comissões ou clientes de outros corretores.`;
+  return `Você é o COPILOTO COMERCIAL da Brilhante's Imóveis${canal === "bia" ? " (interface Brilhante's IA)" : " (Assistente IA do sistema)"}: um gerente comercial experiente sentado ao lado do corretor, ajudando a vender e a tomar decisões melhores. Você não substitui o corretor: deixa ele mais rápido, preparado e estratégico. Quem decide é ele.
+Hoje é ${dia}, ${dBR(T)}. ${quem}
+
+A EMPRESA
+- Imobiliária ESPECIALISTA EM LOTEAMENTOS na Região Metropolitana de Fortaleza (CE) desde 2012; também atua com um loteamento em Serra (ES). Valores: transparência, honestidade, proatividade.
+- Cliente típico: morador da Região Metropolitana ou de Fortaleza querendo sair da cidade; compra para MORAR (muitos querem construir logo a casa do jeito que sonham) ou para INVESTIR e revender.
+- Maior dúvida dos clientes: a CORREÇÃO das parcelas (índice IPCA ou IGP-M, anual ou mensal). Sempre consulte a tabela_precos/detalhes_loteamento antes de responder.
+- O que faz fechar: localização, acessibilidade, entrada facilitada, novidade/lançamento, estar na região que procura e indicação de amigo.
+- Expressões da casa: "Realize o sonho do seu lote", "Invista no seu futuro", "Quem compra terra não erra".
+
+PERSONALIDADE
+Prática, direta, comercial, estratégica, confiante, natural e próxima. Fale como gente, em português correto e sem gírias. Nada de linguagem corporativa ("Prezado corretor", "Com base nos dados fornecidos, podemos concluir"). Prefira: "Eu iria por esse caminho.", "Essa objeção parece ser mais de condição do que de preço.", "Eu não ofereceria desconto ainda.", "Eu responderia assim pra ele:".
+
+COMO PENSAR
+1. Identifique a intenção real antes de responder: informação, preço, comparação, objeção, argumento, mensagem de WhatsApp, follow-up, negociação, fechamento, análise de cliente, organização de agenda ou estratégia.
+2. Se faltar contexto importante, pergunte de forma curta ("Qual loteamento?", "Ele busca moradia ou investimento?", "Qual faixa de parcela ele passou?"). Não chute.
+3. Consulte as ferramentas ANTES de responder sobre loteamentos, preços, condições, comissões, vendas, clientes ou agenda.
+4. Responda em camadas, usando só os blocos que fizerem sentido:
+   **Resposta:** a informação direta, exatamente o que foi perguntado.
+   **💡 Eu faria:** a orientação comercial.
+   **🗣️ Você pode falar:** a mensagem pronta para o cliente.
+   **➡️ Próximo passo:** a ação recomendada.
+
+PLAYBOOK
+- OBJEÇÕES: ouvir → entender → responder → avançar. Não defenda o preço de cara: primeiro ajude o corretor a descobrir a objeção real (ex.: "caro" é o valor total ou a parcela?) e sugira a pergunta exata a fazer.
+- "ME AJUDA A VENDER O LOTEAMENTO X": consulte a ficha e responda com Perfil ideal do cliente · Principal argumento · Diferenciais · Possíveis objeções · Como responder cada uma · Próxima pergunta para o cliente.
+- WHATSAPP: mensagens curtas, naturais e humanas, como uma pessoa falando com outra, fáceis de copiar, adequadas ao estágio (primeiro contato, interessado, sumido, pediu preço, achou caro, pediu desconto, visitou, pós-visita, quase fechando, follow-up, fechamento). Emojis com moderação. Nada de texto corporativo.
+- FECHAMENTO: se o cliente já demonstrou interesse, pare de despejar informação; oriente a descobrir o que mais chamou a atenção dele e conduzir o fechamento a partir disso.
+- COMPARAÇÃO: considere orçamento, tamanho do lote, localização, infraestrutura, entrada, parcelamento, correção, perfil familiar e objetivo. Explique o porquê ("Eu iria de X porque ele priorizou parcela baixa e localização; o Y seria melhor se priorizasse infraestrutura").
+- DESCONTO: nunca prometa desconto, promoção ou condição que não esteja cadastrada; oriente a falar com o gestor.
+
+VERACIDADE (inegociável)
+- Use SOMENTE dados das ferramentas. Nunca invente preço, parcela, desconto, promoção, prazo, comissão, metragem, quantidade de lotes, infraestrutura ou condição.
+- Disponibilidade de lotes: o sistema NÃO controla. Diga que precisa confirmar com a construtora ou com o gestor.
+- Valorização: fale em potencial de valorização, nunca em percentual ou ganho garantido.
+- Se não encontrar: "Não encontrei essa informação cadastrada." ou "Preciso confirmar na tabela atualizada." Nunca preencha lacuna inventando.
+
+FORMATO
+- Valores em reais no formato R$ 1.234,56. Datas no formato brasileiro.
+- ${canal === "bia" ? "Cards, tabelas e fichas aparecem automaticamente abaixo da sua resposta quando você usa as ferramentas: NÃO repita listas longas que já estão nos cards; comente, interprete e oriente. Seja objetiva (em geral até 8 linhas; mensagens de WhatsApp e planos de venda podem ser maiores)." : "Seja objetiva (em geral até 12 linhas; planos de venda e mensagens podem ser maiores). Use listas curtas quando ajudar."}
+- Agenda: para criar visitas, ligações ou tarefas use criar_tarefa com data/hora AAAA-MM-DDTHH:MM (horário de Fortaleza; sem hora, use 09:00).
+- Sempre que fizer sentido, termine com uma orientação prática ("E agora eu faria isso…").`;
 }
-function biaTools(UI){
+function copilotoTools(UI, canal){
+  const base = biaTools(UI, canal);
+  if (!isAdmin) return base;
+  const so = canal === "assistente" ? base.filter(t => !["minhas_comissoes", "detalhe_venda", "meus_clientes", "minha_agenda", "ranking_mes"].includes(t.name)) : base;
+  const adm = typeof aiTools === "function" ? aiTools() : [];
+  const agEq = {name: "agenda_equipe", description: "Agenda de toda a equipe (visitas, ligações, reuniões e tarefas em aberto), opcionalmente de um corretor. Inclui atrasadas e próximas.", inputSchema: {type: "object", properties: {corretor: {type: "string"}, incluir_concluidas: {type: "boolean"}}},
+    execute: i => [...st.agenda.values()].filter(a => !a.deleted_at && (i.incluir_concluidas || !a.done) && (!i.corretor || norm(a.owner_name || "").includes(norm(i.corretor)))).sort((x, y) => (x.when || "").localeCompare(y.when || "")).slice(0, 60).map(a => ({quando: a.when, titulo: a.title, tipo: a.type, cliente: a.client_name, responsavel: a.owner_id === "owner" ? "Gestor" : a.owner_name, concluida: !!a.done, obs: a.notes}))};
+  return [...so, ...adm.filter(t => !so.some(x => x.name === t.name)), agEq];
+}
+
+const sysPrompt = () => copilotoPrompt("bia");
+BIA.copiloto = {prompt: copilotoPrompt, tools: copilotoTools};
+function biaTools(UI, canal){
   const resumoLot = l => ({nome: l.name, cidade: l.cidade, bairro: l.bairro, tipo: l.tipo, a_partir_de: l.com.valor_a_partir || "", metragem: l.tec.metragem_min ? `${l.tec.metragem_min}${l.tec.metragem_max ? "-" + l.tec.metragem_max : ""}` : "", entrada_minima: l.com.entrada_minima || "", parcelas: l.com.max_parcelas || "", financiamento: l.com.financiamento || "", obra: OBRA[l.obra.status] || "", fase: PHASES[l.phase] || ""});
   const findLot = n => { const l = D.lot(n || ""); if (!l) throw new Error("Loteamento não encontrado. Existentes: " + D.lots().map(x => x.name).join(", ")); return l; };
   return [
     {name: "listar_loteamentos", description: "Lista os loteamentos cadastrados, com filtros opcionais por cidade, tipo (aberto/fechado) ou texto. Mostra os cards ao corretor.", inputSchema: {type: "object", properties: {cidade: {type: "string"}, tipo: {type: "string", enum: ["aberto", "fechado"]}, busca: {type: "string"}}},
       execute: i => { let L = D.lots(); if (i.cidade) L = L.filter(l => norm(l.cidade + " " + l.bairro).includes(norm(i.cidade))); if (i.tipo) L = L.filter(l => l.tipo === i.tipo); if (i.busca) L = L.filter(l => norm(l.name + " " + l.cidade + " " + l.infra.join(" ")).includes(norm(i.busca))); UI.push({t: "lots", ids: L.map(l => l.id)}); return {total: L.length, loteamentos: L.map(resumoLot)}; }},
-    {name: "detalhes_loteamento", description: "Ficha completa de um loteamento: dados técnicos, infraestrutura, obra, localização, condições, material do book e disponibilidade.", inputSchema: {type: "object", properties: {nome: {type: "string"}}, required: ["nome"]},
-      execute: i => { const l = findLot(i.nome); UI.push({t: "lotResumo", id: l.id}); return lotText(l) + (l.resumo ? `\n\nMATERIAL DO BOOK:\n${l.resumo}` : "") + `\n\nDISPONIBILIDADE: ${disponHTML(l, true) || "não cadastrada"} (vendidos pela Brilhante's: ${l.vendidos || 0})`; }},
+    {name: "detalhes_loteamento", description: "Ficha completa de um loteamento: dados técnicos, infraestrutura, obra, localização, condições e material do book.", inputSchema: {type: "object", properties: {nome: {type: "string"}}, required: ["nome"]},
+      execute: i => { const l = findLot(i.nome); UI.push({t: "lotResumo", id: l.id}); return lotText(l) + (l.resumo ? `\n\nMATERIAL DO BOOK:\n${l.resumo}` : ""); }},
     {name: "tabela_precos", description: "Tabela de preços e condições de pagamento de um loteamento (valores, entrada, parcelas, juros, correção, balões).", inputSchema: {type: "object", properties: {nome: {type: "string"}}, required: ["nome"]},
       execute: i => { const l = findLot(i.nome); UI.push({t: "precos", id: l.id}); return {loteamento: l.name, ...l.com, metragem_min: l.tec.metragem_min, metragem_max: l.tec.metragem_max, tabelas_pdf: l.docs.filter(m => m.category === "tabela_preco").map(m => m.title)}; }},
     {name: "comparar_loteamentos", description: "Compara 2 ou 3 loteamentos lado a lado.", inputSchema: {type: "object", properties: {nomes: {type: "array", items: {type: "string"}}}, required: ["nomes"]},
@@ -555,8 +599,8 @@ function biaTools(UI){
       execute: i => { UI.push({t: "clientes", q: i.busca || ""}); return D.clientes().filter(c => !i.busca || norm(c.nome).includes(norm(i.busca))).slice(0, 30).map(c => ({nome: c.nome, telefone: c.fone, compras: c.compras.map(v => `${v.property_name} Q${v.quadra} L${v.lote} (${v.sale_date})`), ultima: c.ultima})); }},
     {name: "minha_agenda", description: "Agenda e tarefas do corretor (visitas, ligações, reuniões), incluindo atrasadas e próximas.", inputSchema: {type: "object", properties: {}},
       execute: async () => { await D.loadAgenda(); UI.push({t: "tarefas"}); return D.agendaItems().filter(a => !a.done).sort((x, y) => (x.when || "").localeCompare(y.when || "")).slice(0, 40).map(a => ({quando: a.when, titulo: a.title, tipo: a.type, cliente: a.client_name, obs: a.notes})); }},
-    {name: "criar_tarefa", description: "Cria um compromisso/tarefa na agenda do corretor (visita, ligação/retorno, plantão ou outro).", inputSchema: {type: "object", properties: {titulo: {type: "string"}, quando: {type: "string", description: "AAAA-MM-DDTHH:MM"}, tipo: {type: "string", enum: Object.keys(ATYPE)}, cliente: {type: "string"}, loteamento: {type: "string"}, obs: {type: "string"}}, required: ["titulo", "quando"]},
-      execute: async i => { await D.loadAgenda(); const d = await D.salvarAgenda({id: rid("appt"), created_at: nowISO(), done: false, title: i.titulo, when: String(i.quando).slice(0, 16), type: i.tipo || "outro", client_name: i.cliente || "", lot: i.loteamento || "", notes: i.obs || ""}); UI.push({t: "tarefas"}); widgets(); return {ok: true, criado: d.when}; }},
+    {name: "criar_tarefa", description: "Cria um compromisso/tarefa na agenda (visita, ligação/retorno, plantão ou outro). Na Assistente IA do gestor, informe corretor para agendar para alguém da equipe; sem corretor, fica na agenda do gestor.", inputSchema: {type: "object", properties: {titulo: {type: "string"}, corretor: {type: "string"}, quando: {type: "string", description: "AAAA-MM-DDTHH:MM"}, tipo: {type: "string", enum: Object.keys(ATYPE)}, cliente: {type: "string"}, loteamento: {type: "string"}, obs: {type: "string"}}, required: ["titulo", "quando"]},
+      execute: async i => { await D.loadAgenda(); const own = isAdmin && canal === "assistente" ? (() => { const t = i.corretor && teamList().find(x => x.src === "usuarios" && norm(x.name).includes(norm(i.corretor))); return t ? {owner_id: t.id, owner_name: t.name} : {owner_id: "owner", owner_name: ""}; })() : {}; const d = await D.salvarAgenda({id: rid("appt"), created_at: nowISO(), done: false, ...own, title: i.titulo, when: String(i.quando).slice(0, 16), type: i.tipo || "outro", client_name: i.cliente || "", lot: i.loteamento || "", notes: i.obs || ""}); UI.push({t: "tarefas"}); try { widgets(); } catch {} return {ok: true, criado: d.when}; }},
     {name: "ranking_mes", description: "Ranking de vendas dos corretores no mês atual.", inputSchema: {type: "object", properties: {}},
       execute: () => { UI.push({t: "ranking"}); return D.ranking().slice(0, 10).map((r, k) => ({posicao: k + 1, nome: r.label, vendas: r.qtd})); }}
   ];
@@ -569,7 +613,7 @@ async function ask(q, opts = {}){
   BIA.busy = true; setState("analisando"); const stopT = thinking(); const UI = [];
   try {
     const hist = [...BIA.hist.slice(-10), {role: "user", content: q}];
-    const r = await ai(hist, {tools: biaTools(UI), system: sysPrompt(), modelTier: "default"});
+    const r = await ai(hist, {tools: copilotoTools(UI, "bia"), system: copilotoPrompt("bia"), modelTier: "default"});
     stopT(); BIA.hist.push({role: "user", content: q}, {role: "assistant", content: r.text});
     const seen = new Set(), ui = UI.filter(b => { const k = JSON.stringify(b); if (seen.has(k)) return false; seen.add(k); return true; });
     setState("respondendo"); BIA.busy = false;
@@ -597,7 +641,7 @@ function ouvir(){
   r.onend = () => { REC = null; micLevel(false); if (final.trim()) ask(final, {voz: true}); else { if (inp) inp.value = ""; setState("pronto"); } };
   try { r.start(); } catch { REC = null; setState("pronto"); }
 }
-const limpaFala = t => String(t || "").replace(/\*\*/g, "").replace(/[*_#`>]/g, "").replace(/^\s*[-•]\s+/gm, "").replace(/R\$\s?/g, "R$ ").replace(/\n+/g, ". ").replace(/\s+/g, " ").trim();
+const limpaFala = t => String(t || "").replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu, "").replace(/\*\*/g, "").replace(/[*_#`>]/g, "").replace(/^\s*[-•]\s+/gm, "").replace(/R\$\s?/g, "R$ ").replace(/\n+/g, ". ").replace(/\s+/g, " ").trim();
 function fimFala(){ ORB.analyser = null; if (BIA.state === "respondendo") setState("finalizado"); if (BIA.set.conversa && document.getElementById("bia")) setTimeout(() => { if (BIA.state !== "analisando" && !REC) ouvir(); }, 700); }
 function stopFala(){ try { speechSynthesis.cancel(); } catch {} if (AUD){ try { AUD.pause(); } catch {} AUD = null; } ORB.analyser = null; }
 async function falar(text){
@@ -684,6 +728,27 @@ BIA.mount = mount; BIA.refresh = () => { if (document.getElementById("bia")) wid
 // gestor: nova aba (com prévia "visualizando como" corretor)
 if (typeof TABS !== "undefined" && typeof VIEWS !== "undefined"){
   TABS.splice(TABS.length, 0, ["bia", "Brilhante's IA"]);
+  /* Assistente IA do gestor: mesma inteligência e ferramentas da Brilhante's IA (muda só a interface) */
+  if (typeof Assistente === "object"){
+    const SUG = ["Me ajuda a vender o Jardins Maranguape", "O cliente achou caro. Como eu respondo?", "Mensagem para um cliente que sumiu depois da visita", "Quanto vendemos este mês e quanto falta receber?", "Quais comissões estão vencidas?", "Quem lidera o ranking do ano?"];
+    Assistente.html = () => `<div class="pagehead"><div><h1>Assistente IA</h1><p>Seu copiloto comercial: vendas, comissões, clientes, agenda, loteamentos, preços, objeções e mensagens para WhatsApp. Consulta os dados reais do sistema.</p></div><button class="btn" id="chNew">Nova conversa</button></div>
+    <section class="card"><div class="bd fs"><div id="chLog" class="fs"></div>
+      <div class="toolbar" id="chSug">${SUG.map(q => `<button class="btn sm" data-sq="${esc(q)}">${esc(q)}</button>`).join("")}</div>
+      <form class="toolbar" id="chForm"><input type="text" id="chQ" placeholder="Pergunte ou peça ajuda numa venda" style="flex:1 1 260px" aria-label="Pergunta"><button class="btn pri">Enviar</button></form>
+      <div class="toolbar"><button class="btn sm" id="aiImp">Importar vendas de um arquivo</button><span style="color:var(--mfg);font-size:12px">Cada pergunta à IA custa alguns centavos na sua conta da API.</span></div></div></section>`;
+    Assistente.bind = function(){
+      const draw = () => { $("#chLog").innerHTML = chatHist.map(m => `<div style="align-self:${m.role === "user" ? "flex-end" : "flex-start"};max-width:min(760px,94%);background:${m.role === "user" ? "var(--primary)" : "var(--muted)"};color:${m.role === "user" ? "var(--pfg)" : "var(--fg)"};padding:10px 14px;border-radius:14px">${m.html || mdLite(m.content)}</div>`).join(""); $("#chSug").hidden = !!chatHist.length; };
+      const send = async q => { if (!q) return; if (!ai) return toast(AIERR.not_granted); chatHist.push({role: "user", content: q}); const bot = {role: "assistant", content: "", html: "Consultando os dados…"}; chatHist.push(bot); draw();
+        const hist = chatHist.slice(0, -1).filter(m => m.content).slice(-12).map(m => ({role: m.role, content: m.content}));
+        try { const r = await ai(hist, {tools: copilotoTools([], "assistente"), system: copilotoPrompt("assistente") + `\nPeríodo aberto na tela do sistema: ${periodLabel()}.`, modelTier: "default", onText: ({text}) => { bot.html = null; bot.content = text; draw(); }}); bot.content = r.text; bot.html = null; }
+        catch (e){ bot.content = ""; bot.html = `<span style="color:var(--bad)">${esc(aiMsg(e))}</span>`; }
+        draw(); };
+      $("#chForm").onsubmit = e => { e.preventDefault(); const q = $("#chQ").value.trim(); $("#chQ").value = ""; send(q); };
+      $("#chSug").onclick = e => { const b = e.target.closest("[data-sq]"); if (b) send(b.dataset.sq); };
+      $("#chNew").onclick = () => { chatHist = []; draw(); };
+      $("#aiImp").onclick = openImportAI; draw();
+    };
+  }
   VIEWS.bia = {html: () => `<div id="biaRoot"></div>`, bind(){ mount(document.getElementById("biaRoot")); }, update(){ BIA.refresh(); }};
 }
 // corretor: vira a primeira aba ("Início")

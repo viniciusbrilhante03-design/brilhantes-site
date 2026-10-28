@@ -136,13 +136,15 @@ function showLogin(msg){
 }
 /* retorno do "Entrar com Google": o Supabase devolve a sessão no endereço (#access_token=...) */
 async function voltaGoogle(){
-  const h = location.hash || "";
-  if (!/access_token=|error_description=|error=/.test(h)) return "";
-  const q = new URLSearchParams(h.slice(1));
-  history.replaceState(null, "", location.pathname + location.search);
+  const h = (location.hash || "").slice(1), qs = (location.search || "").slice(1);
+  const src = /access_token=|error=/.test(h) ? h : /error=/.test(qs) ? qs : "";
+  if (!src) return "";
+  const q = new URLSearchParams(src);
+  history.replaceState(null, "", location.pathname);
   if (!q.get("access_token")){
     const d = (q.get("error_description") || q.get("error") || "").replace(/\+/g, " ");
-    return /signup|not allowed|disabled/i.test(d) ? "Esta conta Google não tem acesso ao sistema. Entre com e-mail e senha ou fale com o gestor." : "Não foi possível entrar com o Google. Tente de novo.";
+    const det = d ? ` (detalhe: ${d.replace(/[<>&"]/g, "").slice(0, 160)})` : "";
+    return /signup|not allowed|disabled/i.test(d) ? "Esta conta Google não tem acesso ao sistema. Entre com e-mail e senha ou fale com o gestor." + det : "Não foi possível entrar com o Google." + det;
   }
   try {
     const c = await config(), at = q.get("access_token");
@@ -151,7 +153,7 @@ async function voltaGoogle(){
     keep({access_token: at, refresh_token: q.get("refresh_token"), expires_at: +q.get("expires_at") || 0, expires_in: +q.get("expires_in") || 3600, user: u});
     if (u.email) LS.set("bri.email", u.email.toLowerCase());
     return "";
-  } catch { return "Não foi possível entrar com o Google. Tente de novo."; }
+  } catch (e){ return "Não foi possível entrar com o Google (detalhe: falha ao confirmar a sessão)."; }
 }
 async function loadProfile(){
   const r = await api(`/rest/v1/profiles?select=role,nome,email&id=eq.${enc(SES.user.id)}`);
@@ -167,6 +169,7 @@ async function bancoVazio(){
 function b64ToBlob(b64, type){ const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], {type: type || "application/octet-stream"}); }
 async function importar(json, prog){
   const cols = json.collections || json.colecoes || {};
+  if (cols.sales || cols.lot_images || cols.appointments) throw new Error("este é o backup bruto do site antigo. Mande ele no chat para ser convertido e importe o arquivo de atualização gerado.");
   const rows = [];
   for (const [col, v] of Object.entries(cols)){
     const docs = Array.isArray(v) ? v : Object.values(v || {});
