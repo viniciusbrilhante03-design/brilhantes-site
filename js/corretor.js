@@ -28,6 +28,10 @@ const podeEditar = v => { const d = diasDesde(v && v.created_at); return d == nu
 .chips-o button.on{background:var(--primary);color:var(--pfg);border-color:var(--primary)}
 .cx-lbl{font-size:13px;font-weight:600}
 dialog[open]{display:block}
+.gm-style .gm-style-iw-c{padding-top:10px!important}
+.gm-style button.gm-ui-hover-effect{opacity:1!important;width:36px!important;height:36px!important;margin:4px!important;background:#1a4636!important;border-radius:50%!important;box-shadow:0 2px 6px rgba(0,0,0,.35)!important;display:grid!important;place-items:center!important}
+.gm-style button.gm-ui-hover-effect>span{background-color:#fff!important;width:18px!important;height:18px!important;margin:0!important}
+.gm-style button.gm-ui-hover-effect img{filter:invert(1) brightness(2)!important;width:18px!important;height:18px!important;margin:0!important}
 @media (max-width:760px){
   dialog#dlg{position:fixed;inset:0;margin:0;width:100vw;max-width:100vw;height:100vh;height:100dvh;max-height:none;border-radius:0}
   dialog#dlg>.dlg,dialog#dlg>form.dlg{height:100%;max-height:100%}
