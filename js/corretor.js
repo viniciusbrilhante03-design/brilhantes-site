@@ -4,6 +4,7 @@
 "use strict";
 (function(){
 const PRAZO = 60;
+try { if (window.HTMLDialogElement && !HTMLDialogElement.prototype.showModal){ HTMLDialogElement.prototype.showModal = function(){ this.setAttribute("open", ""); }; HTMLDialogElement.prototype.close = function(){ this.removeAttribute("open"); this.dispatchEvent(new Event("close")); }; } } catch {}
 const COR = {clientes: null, eq: null, finFiltro: "abertas", cliQ: "", lotQ: ""};
 async function corAPI(body){
   const t = await window.__bri.token();
@@ -26,14 +27,14 @@ const podeEditar = v => { const d = diasDesde(v && v.created_at); return d == nu
 .chips-o button{border:1px solid var(--border);background:var(--card);color:var(--fg);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
 .chips-o button.on{background:var(--primary);color:var(--pfg);border-color:var(--primary)}
 .cx-lbl{font-size:13px;font-weight:600}`; document.head.appendChild(st2); })();
-const ORIGEM = [["acao", "Ação"], ["lead", "Lead anúncio"], ["carteira", "Carteira"], ["stand", "Stand"], ["indicacao", "Indicação"], ["outro", "Outro"]];
+const ORIGEM = [["acao", "🎯 Ação"], ["lead", "📣 Lead anúncio"], ["carteira", "📋 Carteira"], ["stand", "🏢 Stand"], ["indicacao", "🤝 Indicação"], ["outro", "✏️ Outro"]];
 function blocoExtrasCliente(v, pre){
   const sp = v.spouse || {};
   return `<div class="cx" style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="cx-lbl">Possui cônjuge/companheiro?</span><span class="chips-o" data-cxsp><button type="button" data-v="0" class="${v.has_spouse ? "" : "on"}">Não</button><button type="button" data-v="1" class="${v.has_spouse ? "on" : ""}">Sim</button></span></div>
     <div class="g" data-cxspf ${v.has_spouse ? "" : "hidden"}>
       <label class="f">Nome do cônjuge<input type="text" data-cxk="name" value="${esc(sp.name || "")}"></label><label class="f">Telefone<input type="tel" data-cxk="phone" value="${esc(sp.phone || "")}"></label>
-      <label class="f">CPF<input type="text" data-cxk="cpf" value="${esc(sp.cpf || "")}"></label><label class="f">Nascimento<input type="date" data-cxk="birthdate" value="${esc(sp.birthdate || "")}"></label></div>
+      <label class="f">E-mail<input type="email" data-cxk="email" value="${esc(sp.email || "")}"></label><label class="f">CPF<input type="text" data-cxk="cpf" value="${esc(sp.cpf || "")}"></label><label class="f">Nascimento<input type="date" data-cxk="birthdate" value="${esc(sp.birthdate || "")}"></label></div>
     <div style="display:flex;flex-direction:column;gap:6px"><span class="cx-lbl">Origem <span style="color:var(--mfg);font-weight:400">(opcional)</span></span><span class="chips-o" data-cxor>${ORIGEM.map(([k, l]) => `<button type="button" data-v="${k}" class="${v.origin === k ? "on" : ""}">${l}</button>`).join("")}</span></div>
     <label class="f">Observação do cliente <span style="color:var(--mfg);font-weight:400">(opcional)</span><textarea data-cxnotes rows="2" placeholder="Fica no cadastro do cliente">${esc(v.notes || "")}</textarea></label></div>`;
 }
@@ -362,27 +363,91 @@ function telaFinanceiro(){
     ${L.length ? `<div class="tablewrap"><table><thead><tr><th>Vencimento</th><th>Venda</th><th>Parcela</th><th class="r">Minha parte</th><th class="r">Recebido</th><th>Status</th><th></th></tr></thead><tbody>${L.map(r => `<tr data-v="${esc(r.v.id)}" style="cursor:pointer"><td class="num">${dBR(r.due)}</td><td><b>${esc(r.v.property_name)}</b><span class="s">Q ${esc(r.v.quadra) || "–"} · L ${esc(r.v.lote) || "–"} · ${esc(r.v.client_name) || "—"}</span></td><td>${esc(r.n)}</td><td class="r num">${brl(r.valor)}</td><td class="r num">${brl(r.pago)}</td><td><span class="pill ${r.st[1]}">${r.st[0]}</span></td><td class="r">${r.v.avulsa ? "" : `<button class="btn sm ${r.st[0] === "Recebida" ? "" : "pri"}" data-receber="${esc(r.v.id)}" data-parc="${r.num || 0}" data-ok="${r.st[0] === "Recebida" ? 0 : 1}">${r.st[0] === "Recebida" ? "Desmarcar" : "Recebi"}</button>`}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Nada neste filtro e período.</div>`}
     <p style="color:var(--mfg);font-size:12px;margin:10px 0 0">Ao marcar “Recebi”, o gestor é avisado e a baixa fica registrada na Auditoria. Vendas recém-cadastradas aparecem com valores estimados até o gestor abrir o sistema.</p></div></section>`;
 }
+/* ---------- Minha agenda (corretor) ---------- */
+const AG = () => (window.BIA && BIA.D) ? BIA.D : null;
+async function agendaCarregar(forcar){ const D2 = AG(); if (!D2) return []; if (forcar) BIA.agendaLoaded = false; await D2.loadAgenda(); return D2.agendaItems(); }
+const agItens = () => { const D2 = AG(); return D2 ? D2.agendaItems() : []; };
+function formTarefa(a){
+  a = a || {title: "", type: "visita", when: T + "T09:00", client_name: "", lot: "", notes: ""};
+  const dt = String(a.when || "").slice(0, 10), hr = String(a.when || "").slice(11, 16) || "09:00";
+  modal(`<form class="dlg" novalidate style="max-width:520px"><div class="dh"><div style="flex:1"><h2>${a.id ? "Editar tarefa" : "Nova tarefa"}</h2></div><button type="button" class="btn icon" data-x aria-label="Fechar">✕</button></div>
+    <div class="db"><div class="g">
+      <label class="f" style="grid-column:1/-1">Título *<input type="text" name="title" value="${esc(a.title)}" placeholder="ex.: Visita com João no Golden Ville" required></label>
+      <label class="f">Tipo<select name="type">${Object.entries(ATYPE).map(([k, l]) => `<option value="${k}" ${a.type === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label class="f">Data *<input type="date" name="d" value="${esc(dt)}" required></label>
+      <label class="f">Hora<input type="time" name="h" value="${esc(hr)}"></label>
+      <label class="f">Cliente<input type="text" name="client_name" list="dlAgCli" value="${esc(a.client_name || "")}"></label>
+      <label class="f" style="grid-column:1/-1">Loteamento<input type="text" name="lot" list="dlAgLot" value="${esc(a.lot || "")}"></label></div>
+      <label class="f">Observações<textarea name="notes" rows="3">${esc(a.notes || "")}</textarea></label><div id="agWarn"></div>
+      <datalist id="dlAgCli">${meusClientes().map(c => `<option value="${esc(c.nome)}">`).join("")}</datalist><datalist id="dlAgLot">${(PUB.lots || []).map(l => `<option value="${esc(l.name)}">`).join("")}</datalist></div>
+    <div class="df">${a.id ? `<button type="button" class="btn danger" data-agdel style="margin-right:auto">Excluir</button>` : ""}<button type="button" class="btn" data-x>Cancelar</button><button class="btn pri">Salvar</button></div></form>`, async (fd, f) => {
+      const title = fv(fd, "title"), d = fv(fd, "d"); if (!title || !d) return $("#agWarn").innerHTML = `<div class="alert e">Informe o título e a data.</div>`;
+      const b = f.querySelector("button.pri"); b.disabled = true;
+      try { await AG().salvarAgenda({...(a.id ? a : {id: rid("appt"), created_at: nowISO(), done: false}), title, type: fv(fd, "type"), when: d + "T" + (fv(fd, "h") || "09:00"), client_name: fv(fd, "client_name"), lot: fv(fd, "lot"), notes: fv(fd, "notes")}); $("#dlg").close(); toast("Tarefa salva"); if (ui.tab === "agendaC") renderCorretor(); agSyncSilencioso(); }
+      catch (e){ b.disabled = false; $("#agWarn").innerHTML = `<div class="alert e">${esc(e.message)}</div>`; }
+    });
+  const del = $("#dlg [data-agdel]"); if (del) del.onclick = async () => { if (!del.dataset.ok){ del.dataset.ok = "1"; del.textContent = "Confirmar exclusão"; return; } try { await AG().salvarAgenda({...a, deleted_at: nowISO()}); $("#dlg").close(); toast("Tarefa excluída"); renderCorretor(); agSyncSilencioso(); } catch (e){ toast(e.message); } };
+}
+function agSyncSilencioso(){ try { if (GA.st && GA.st.connected) setTimeout(() => gaSincronizar(true), 800); } catch {} }
+function telaAgenda(){
+  const L = agItens().slice().sort((x, y) => (x.when || "").localeCompare(y.when || "")), hoje = T;
+  const atras = L.filter(a => !a.done && (a.when || "").slice(0, 10) < hoje), hj = L.filter(a => !a.done && (a.when || "").slice(0, 10) === hoje), prox = L.filter(a => !a.done && (a.when || "").slice(0, 10) > hoje), feitas = L.filter(a => a.done).reverse().slice(0, 15);
+  const fone = n => { const c = meusClientes().find(x => norm(x.nome) === norm(n)); return c && c.fone; };
+  const item = a => `<div class="card" style="padding:10px 12px;box-shadow:none;display:flex;gap:10px;align-items:flex-start">
+    <input type="checkbox" class="chk" data-agdone="${esc(a.id)}" ${a.done ? "checked" : ""} aria-label="Concluída" style="margin-top:3px">
+    <div style="flex:1;min-width:0;${a.done ? "opacity:.6;text-decoration:line-through" : ""}"><b>${esc(a.title)}</b><span style="display:block;color:var(--mfg);font-size:12.5px">${dBR(a.when)}${String(a.when || "").length > 10 ? " · " + String(a.when).slice(11, 16) : ""} · ${esc(ATYPE[a.type] || "Outro")}${a.client_name ? " · " + esc(a.client_name) : ""}${a.lot ? " · " + esc(a.lot) : ""}</span>${a.notes ? `<span style="display:block;font-size:12.5px">${esc(a.notes)}</span>` : ""}</div>
+    <span class="toolbar" style="flex:none">${a.client_name && waLink(fone(a.client_name)) ? `<a class="btn sm" href="${esc(waLink(fone(a.client_name)))}" target="_blank" rel="noopener">WhatsApp</a>` : ""}<button class="btn sm" data-agedit="${esc(a.id)}">Editar</button></span></div>`;
+  const bloco = (t, arr, cor) => arr.length ? `<section class="card"><div class="hd"><h2>${t} <span class="pill ${cor}">${arr.length}</span></h2></div><div class="bd" style="display:flex;flex-direction:column;gap:8px">${arr.map(item).join("")}</div></section>` : "";
+  return `<div class="pagehead"><div><h1>Minha agenda</h1><p>Visitas, retornos e tarefas · ${L.filter(a => !a.done).length} em aberto</p></div><button class="btn pri" data-agnova>+ Nova tarefa</button></div>
+    ${typeof gaCard === "function" ? gaCard() : ""}
+    <div style="display:flex;flex-direction:column;gap:12px">${bloco("Atrasadas", atras, "p-bad")}${bloco("Hoje", hj, "p-gold")}${bloco("Próximas", prox, "p-mut")}${!atras.length && !hj.length && !prox.length ? `<div class="empty"><b>Nenhuma tarefa em aberto</b>Toque em “+ Nova tarefa” para agendar uma visita ou retorno.</div>` : ""}${bloco("Concluídas recentemente", feitas, "p-ok")}</div>`;
+}
+// Google Agenda do corretor: as tarefas dele, os vencimentos da comissão dele e os aniversários dos clientes dele
+if (typeof gaEventos === "function"){
+  const _gaEv = gaEventos;
+  gaEventos = function(){
+    if (isAdmin) return _gaEv.apply(this, arguments);
+    const ev = [];
+    for (const a of agItens()){ if (a.deleted_at || a.done || !a.when) continue; const w = String(a.when).slice(0, 16);
+      ev.push(w.length > 10 ? {key: "appt" + a.id, titulo: `[Brilhante] ${a.title}`, descricao: [ATYPE[a.type] || a.type, a.client_name ? "Cliente: " + a.client_name : "", a.lot ? "Loteamento: " + a.lot : "", a.notes || ""].filter(Boolean).join("\n"), inicio: w} : {key: "appt" + a.id, titulo: `[Brilhante] ${a.title}`, descricao: a.notes || "", dia: w.slice(0, 10)}); }
+    for (const v of ((PORTAL && PORTAL.vendas) || [])){ if (v.cancelled) continue; for (const i of v.installments || []){ if (i.received || i.avista || !i.due_date || i.due_date < T || (v.installments.length === 1 && i.due_date === v.sale_date)) continue;
+      ev.push({key: `venc${v.id}-${i.number}`, titulo: `💰 Minha comissão: ${v.property_name} Q${v.quadra || "–"} L${v.lote || "–"} (${brl(i.value)})`, descricao: `Cliente: ${v.client_name || "—"}`, dia: i.due_date}); } }
+    const Y = +T.slice(0, 4);
+    for (const c of COR.clientes || []){ const b = String(c.birthdate || ""); if (!/^\d{4}-\d{2}-\d{2}/.test(b)) continue; ev.push({key: "bday" + norm(c.name), titulo: `🎂 Aniversário de ${c.name}`, descricao: `Cliente · Brilhante's Imóveis${c.phone ? "\nTelefone: " + fmtPhone(c.phone) : ""}`, dia: `${Y}-${b.slice(5, 10)}`, anual: true}); }
+    return ev;
+  };
+}
+if (typeof gaSincronizar === "function"){
+  const _gaS = gaSincronizar;
+  gaSincronizar = async function(){ if (!isAdmin){ try { await agendaCarregar(false); if (!COR.clientes) await carregarClientes(); } catch {} } return _gaS.apply(this, arguments); };
+}
+
 if (typeof bootCorretor === "function"){
   const _boot = bootCorretor, _render = renderCorretor, _openV = openVendaC;
   bootCorretor = async function(){
     const r = await _boot.apply(this, arguments);
     const tabs = $("#tabs");
-    if (tabs && !tabs.querySelector('[data-tab="clientesC"]')){ const ref = tabs.querySelector('[data-tab="vendasC"]'); (ref || tabs.lastElementChild).insertAdjacentHTML("afterend", `<button role="tab" data-tab="clientesC" aria-selected="false">Meus clientes</button><button role="tab" data-tab="finC" aria-selected="false">Meu financeiro</button>`); }
+    if (tabs && !tabs.querySelector('[data-tab="clientesC"]')){ const ref = tabs.querySelector('[data-tab="vendasC"]'); (ref || tabs.lastElementChild).insertAdjacentHTML("afterend", `<button role="tab" data-tab="agendaC" aria-selected="false">Minha agenda</button><button role="tab" data-tab="clientesC" aria-selected="false">Meus clientes</button><button role="tab" data-tab="finC" aria-selected="false">Meu financeiro</button>`); }
     try { db.doc("publico/equipe").onSnapshot(s => { COR.eq = s.exists ? s.data() : null; }, () => {}); } catch {}
     try { db.doc("publico/fotos").onSnapshot(s => { COR.fotos = s.exists ? (s.data().itens || {}) : {}; if (ui.tab === "rankC" || ui.tab === "meu") renderCorretor(); }, () => {}); } catch {}
     carregarClientes();
     return r;
   };
   renderCorretor = function(){
-    if (!PORTAL || (ui.tab !== "clientesC" && ui.tab !== "finC")){
+    if (!PORTAL || (ui.tab !== "clientesC" && ui.tab !== "finC" && ui.tab !== "agendaC")){
       const r = _render.apply(this, arguments);
       if (PORTAL) decorar();
       return r;
     }
-    $("#main").innerHTML = ui.tab === "clientesC" ? telaClientes() : telaFinanceiro();
+    if (ui.tab === "agendaC" && !(window.BIA && BIA.agendaLoaded)){ $("#main").innerHTML = `<div class="empty"><b>Carregando sua agenda…</b></div>`; agendaCarregar(false).then(() => { if (ui.tab === "agendaC") renderCorretor(); }); if (!GA.st) gaStatus(); return; }
+    $("#main").innerHTML = ui.tab === "clientesC" ? telaClientes() : ui.tab === "finC" ? telaFinanceiro() : telaAgenda();
+    if (ui.tab === "agendaC" && !GA.st) gaStatus();
     const q = $("#cliQ"); if (q){ q.oninput = () => { COR.cliQ = q.value; const pos = q.selectionStart; renderCorretor(); const n = $("#cliQ"); if (n){ n.focus(); n.setSelectionRange(pos, pos); } }; }
     $("#main").onclick = e => {
       if (e.target.closest("[data-novocli]")) return formCliente();
+      if (e.target.closest("[data-agnova]")) return formTarefa();
+      const ae = e.target.closest("[data-agedit]"); if (ae) return formTarefa(agItens().find(a => a.id === ae.dataset.agedit));
+      const ad2 = e.target.closest("[data-agdone]"); if (ad2){ const a = agItens().find(x => x.id === ad2.dataset.agdone); if (a) AG().salvarAgenda({...a, done: ad2.checked, done_at: ad2.checked ? nowISO() : null}).then(() => { toast(ad2.checked ? "Tarefa concluída" : "Tarefa reaberta"); renderCorretor(); agSyncSilencioso(); }).catch(err => { toast(err.message); ad2.checked = !ad2.checked; }); return; }
       const ed = e.target.closest("[data-editcli]"); if (ed) return formCliente((COR.clientes || []).find(c => c.id === ed.dataset.editcli));
       const ad = e.target.closest("[data-addcli]"); if (ad){ const c = meusClientes().find(x => x.nome === ad.dataset.addcli) || {}; return formCliente({name: ad.dataset.addcli, phone: c.fone || "", email: "", cpf: "", birthdate: "", origin: "", notes: ""}); }
       const fb = e.target.closest("[data-fin]"); if (fb){ COR.finFiltro = fb.dataset.fin; return renderCorretor(); }
@@ -400,7 +465,7 @@ if (typeof bootCorretor === "function"){
     }
     const head = $("#main .pagehead");
     if (ui.tab === "meu" && head && COR.fotos && !head.querySelector(".av")){ const f = fotoDe(PORTAL.nome); if (f){ head.style.alignItems = "center"; head.insertAdjacentHTML("afterbegin", `<span class="av" style="width:56px;height:56px;flex:none"><img alt="" src="${esc(f)}"></span>`); } }
-    if ((ui.tab === "vendasC" || ui.tab === "meu") && head && !head.querySelector("[data-novavenda]")){ head.insertAdjacentHTML("beforeend", `<button class="btn pri" data-novavenda>+ Nova venda</button>`); head.querySelector("[data-novavenda]").onclick = () => abrirFormVenda(); }
+    if ((ui.tab === "vendasC" || ui.tab === "meu") && head && !head.querySelector("[data-novavenda]")){ head.insertAdjacentHTML("beforeend", `<button class="btn pri" data-novavenda>+ Nova venda</button>`); head.querySelector("[data-novavenda]").onclick = async () => { try { await abrirFormVenda(); if (!$("#saleForm")) throw new Error("o formulário não carregou"); } catch (e){ console.error(e); toast("Não consegui abrir o formulário: " + (e && e.message || e) + ". Atualize a página e tente de novo."); } }; }
     if (ui.tab === "lotsC" && head && !$("#lotQ")){
       head.insertAdjacentHTML("afterend", `<input type="search" id="lotQ" placeholder="Pesquisar loteamento, cidade ou bairro" value="${esc(COR.lotQ)}" style="width:100%;margin:0 0 12px">`);
       const filtrar = () => { const q = norm(COR.lotQ); let n = 0; $$("#main [data-lc]").forEach(b => { const l = (PUB.lots || []).find(x => x.id === b.dataset.lc) || {}, loc = ((l.specs || {}).localizacao) || {}; const ok = !q || norm([l.name, loc.cidade, loc.bairro].join(" ")).includes(q); b.hidden = !ok; if (ok) n++; }); const p = $("#main .pagehead p"); if (p) p.textContent = q ? `${n} de ${(PUB.lots || []).length} loteamentos` : `${(PUB.lots || []).length} loteamentos · fichas, fotos, documentos e copys`; };
