@@ -85,7 +85,7 @@ async function salvarVenda(b, prof, res){
     commission_base: d.commission_base === "financed" ? "financed" : "sale", commission_rate: N(d.commission_rate), broker_split: Math.min(Math.max(N(d.broker_split), 0), 100),
     discounts: (Array.isArray(d.discounts) ? d.discounts : []).filter(x => N(x.value) > 0).slice(0, 20).map(x => ({type: S(x.type, 30), value: N(x.value), reason: S(x.reason, 200)})),
     parcelado: !!d.parcelado, notes: S(d.notes, 2000),
-    client_has_spouse: !!d.client_has_spouse, client_spouse: d.client_has_spouse ? {name: S((d.client_spouse || {}).name, 120), phone: S((d.client_spouse || {}).phone, 40), cpf: S((d.client_spouse || {}).cpf, 20), birthdate: S((d.client_spouse || {}).birthdate, 10)} : null,
+    client_has_spouse: !!d.client_has_spouse, client_spouse: d.client_has_spouse ? {name: S((d.client_spouse || {}).name, 120), phone: S((d.client_spouse || {}).phone, 40), email: S((d.client_spouse || {}).email, 120), cpf: S((d.client_spouse || {}).cpf, 20), birthdate: S((d.client_spouse || {}).birthdate, 10)} : null,
     client_origin: ORIGENS.has(d.client_origin) ? d.client_origin : "", client_notes: S(d.client_notes, 2000)};
   const err = [];
   if (!s.property_name) err.push("Informe o loteamento.");
@@ -202,7 +202,7 @@ module.exports = async (req, res) => {
       const cpf = String(c.cpf || "").replace(/\D/g, "").slice(0, 14);
       const hs = !!c.has_spouse, sp = c.spouse || {};
       const doc = {...(old || {id: rid("client"), created_at: now(), origem_cadastro: "corretor"}), name, name_key: norm(name), cpf: S(c.cpf, 20), cpf_key: cpf, phone: S(c.phone, 40), email: S(c.email, 120), birthdate: S(c.birthdate, 10),
-        origin: S(c.origin, 20), origin_other: S(c.origin_other, 120), has_spouse: hs, spouse: hs ? {name: S(sp.name, 120), phone: S(sp.phone, 40), cpf: S(sp.cpf, 20), birthdate: S(sp.birthdate, 10)} : null, notes: S(c.notes, 2000),
+        origin: S(c.origin, 20), origin_other: S(c.origin_other, 120), has_spouse: hs, spouse: hs ? {name: S(sp.name, 120), phone: S(sp.phone, 40), email: S(sp.email, 120), cpf: S(sp.cpf, 20), birthdate: S(sp.birthdate, 10)} : null, notes: S(c.notes, 2000),
         owner_id: uid, broker_name: prof.nome || "", updated_at: now()};
       if (c.deleted_at && old) doc.deleted_at = now();
       const w = await putDocs([{collection: "clientes", id: doc.id, data: doc}]);
