@@ -26,7 +26,13 @@ const podeEditar = v => { const d = diasDesde(v && v.created_at); return d == nu
 .chips-o{display:flex;flex-wrap:wrap;gap:6px}
 .chips-o button{border:1px solid var(--border);background:var(--card);color:var(--fg);border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
 .chips-o button.on{background:var(--primary);color:var(--pfg);border-color:var(--primary)}
-.cx-lbl{font-size:13px;font-weight:600}`; document.head.appendChild(st2); })();
+.cx-lbl{font-size:13px;font-weight:600}
+dialog[open]{display:block}
+@media (max-width:760px){
+  dialog#dlg{position:fixed;inset:0;margin:0;width:100vw;max-width:100vw;height:100vh;height:100dvh;max-height:none;border-radius:0}
+  dialog#dlg>.dlg,dialog#dlg>form.dlg{height:100%;max-height:100%}
+  dialog#dlg>.dlg>.db{-webkit-overflow-scrolling:touch;min-height:0}
+}`; document.head.appendChild(st2); })();
 const ORIGEM = [["acao", "🎯 Ação"], ["lead", "📣 Lead anúncio"], ["carteira", "📋 Carteira"], ["stand", "🏢 Stand"], ["indicacao", "🤝 Indicação"], ["outro", "✏️ Outro"]];
 function blocoExtrasCliente(v, pre){
   const sp = v.spouse || {};
