@@ -67,6 +67,35 @@ async function clienteDaVenda(s, uid, prof){
   await putDocs([{collection: "clientes", id: doc.id, data: doc}]);
 }
 
+// remove a venda do painel dos corretores envolvidos
+async function tirarDoPainel(s, US){
+  for (const b of s.brokers || [{name: s.broker_name, owner_id: s.owner_id}]){
+    const u = US.find(x => x.id === b.owner_id) || US.find(x => x.role === "corretor" && nomesDe(x).some(n => norm(n) && norm(n) === norm(b.name))); if (!u || !u.claude_id) continue;
+    const p = await getDoc("portal", u.claude_id); if (!p || !(p.vendas || []).some(v => v.id === s.id)) continue;
+    await putDocs([{collection: "portal", id: u.claude_id, data: {...p, vendas: p.vendas.filter(v => v.id !== s.id), updated_at: now()}}]);
+  }
+}
+const KINDS = new Set(["contrato", "proposta", "comprovante", "documento", "outro"]);
+const hex32 = () => require("crypto").randomBytes(16).toString("hex");
+async function vendaDoCorretor(id, uid, prof){
+  const s = await getDoc("vendas", S(id, 60)); if (!s || s.deleted_at) return {erro: [404, "Venda não encontrada."]};
+  const US = await usuarios(), eu = US.find(u => u.id === uid) || {};
+  if (!participa(s, uid, [...nomesDe(eu), prof.nome])) return {erro: [404, "Venda não encontrada."]};
+  return {s, US, eu, nome: S(eu.war_name || eu.name || prof.nome || "Corretor", 80)};
+}
+async function registrar(s, uid, nome, detail, aviso){
+  const ym = now().slice(0, 7);
+  await appendItem("auditoria", ym, {id: rid("aud"), action: "update", sale_id: s.id, property_name: s.property_name, quadra: s.quadra, lote: s.lote, client_name: s.client_name, broker_name: s.broker_name, sale_value: s.sale_value, detail, by: nome, by_id: uid, at: now()}).catch(() => {});
+  if (aviso) await appendItem("avisos", ym, {id: rid("ntf"), type: "venda", message: `${nome}: ${aviso} · ${s.client_name || "cliente"} · ${s.property_name} Q${s.quadra || "-"} L${s.lote || "-"}`, to: "gestor", meta: {sale_id: s.id}, at: now()}, 1500).catch(() => {});
+}
+async function anexar(s, uid, nome, a){
+  const att = {id: rid("att"), asset_id: a.asset_id, name: S(a.nome, 160) || "arquivo", kind: KINDS.has(a.kind) ? a.kind : "outro", content_type: S(a.content_type, 80), size: N(a.size), at: now(), by: nome, by_id: uid};
+  const cur = await getDoc("vendas", s.id), n = {...cur, attachments: [...((cur && cur.attachments) || []), att], updated_at: now()};
+  const w = await putDocs([{collection: "vendas", id: s.id, data: n}]); if (!w.ok) throw new Error("Não foi possível registrar o anexo.");
+  await registrar(n, uid, nome, "Anexo adicionado pelo corretor: " + att.name, "anexou " + att.name);
+  return att;
+}
+
 async function salvarVenda(b, prof, res){
   const d = b.venda || {}, uid = prof.usuario_id;
   const US = await usuarios(), eu = US.find(u => u.id === uid) || {};
@@ -76,7 +105,7 @@ async function salvarVenda(b, prof, res){
     old = await getDoc("vendas", S(d.id, 60));
     if (!old || old.deleted_at) return res.status(404).json({message: "Venda não encontrada."});
     if (!participa(old, uid, [...nomesDe(eu), prof.nome])) return res.status(403).json({message: "Essa venda não é sua."});
-    if (prazoVencido(old)) return res.status(403).json({message: `Essa venda foi cadastrada há mais de ${PRAZO_DIAS} dias. Só o gestor pode alterar.`});
+    if (prazoVencido(old)) return res.status(403).json({message: "Esta venda não pode mais ser editada. Fale com o gestor."});
   }
   const s = {
     property_name: S(d.property_name, 120), quadra: S(d.quadra, 20), lote: S(d.lote, 20),
@@ -183,11 +212,55 @@ module.exports = async (req, res) => {
       await espelhar(s, US).catch(() => {});
       return res.status(200).json({ok: true});
     }
+    if (b.acao === "venda_excluir"){
+      const v = await vendaDoCorretor(b.id, uid, prof); if (v.erro) return res.status(v.erro[0]).json({message: v.erro[1]});
+      if (prazoVencido(v.s)) return res.status(403).json({message: "Esta venda não pode mais ser excluída. Fale com o gestor."});
+      const n = {...v.s, deleted_at: now(), deleted_by: v.nome, updated_at: now()};
+      const w = await putDocs([{collection: "vendas", id: n.id, data: n}]); if (!w.ok) return res.status(500).json({message: "Não foi possível excluir."});
+      await registrar(n, uid, v.nome, "Venda excluída pelo corretor (vai para o histórico)", "excluiu a venda");
+      await tirarDoPainel(n, v.US).catch(() => {});
+      return res.status(200).json({ok: true});
+    }
+    // anexos: o arquivo vai direto para o Storage por um link assinado (sem limite de tamanho da Vercel)
+    if (b.acao === "anexo_url"){
+      const v = await vendaDoCorretor(b.id, uid, prof); if (v.erro) return res.status(v.erro[0]).json({message: v.erro[1]});
+      const id = hex32(), r = await db(`/storage/v1/object/upload/sign/arquivos/${id}`, {method: "POST", body: "{}"});
+      const u = r.ok && r.j && (r.j.url || r.j.signedURL || r.j.signedUrl);
+      if (!u) return res.status(502).json({message: "upload_sign", detail: r.status});
+      return res.status(200).json({asset_id: id, upload_url: URL_() + "/storage/v1" + (u.startsWith("/") ? u : "/" + u)});
+    }
+    if (b.acao === "anexo_ok"){
+      const v = await vendaDoCorretor(b.id, uid, prof); if (v.erro) return res.status(v.erro[0]).json({message: v.erro[1]});
+      const id = String(b.asset_id || ""); if (!/^[a-f0-9]{32}$/.test(id)) return res.status(400).json({message: "Arquivo inválido."});
+      const h = await fetch(URL_() + "/storage/v1/object/public/arquivos/" + id, {method: "HEAD"}).catch(() => null);
+      if (!h || !h.ok) return res.status(400).json({message: "O arquivo não chegou. Tente de novo."});
+      const att = await anexar(v.s, uid, v.nome, {...b, asset_id: id});
+      return res.status(200).json({anexo: att});
+    }
+    if (b.acao === "anexo_b64"){
+      const v = await vendaDoCorretor(b.id, uid, prof); if (v.erro) return res.status(v.erro[0]).json({message: v.erro[1]});
+      const buf = Buffer.from(String(b.b64 || ""), "base64"); if (!buf.length || buf.length > 4e6) return res.status(400).json({message: "Arquivo grande demais para este envio (até 4 MB)."});
+      const id = hex32(), type = S(b.content_type, 80) || "application/octet-stream";
+      const r = await fetch(URL_() + "/storage/v1/object/arquivos/" + id, {method: "POST", headers: svcHeaders({"Content-Type": type, "x-upsert": "false"}), body: buf});
+      if (!r.ok) return res.status(500).json({message: "Não foi possível enviar o arquivo."});
+      const att = await anexar(v.s, uid, v.nome, {...b, asset_id: id, size: buf.length});
+      return res.status(200).json({anexo: att});
+    }
+    if (b.acao === "anexo_rm"){
+      const v = await vendaDoCorretor(b.id, uid, prof); if (v.erro) return res.status(v.erro[0]).json({message: v.erro[1]});
+      const a = (v.s.attachments || []).find(x => x.id === b.anexo && !x.deleted_at);
+      if (!a) return res.status(404).json({message: "Anexo não encontrado."});
+      if (a.by_id !== uid) return res.status(403).json({message: "Só o gestor remove anexos enviados por outra pessoa."});
+      const n = {...v.s, attachments: v.s.attachments.map(x => x.id === a.id ? {...x, deleted_at: now()} : x), updated_at: now()};
+      await putDocs([{collection: "vendas", id: n.id, data: n}]);
+      await registrar(n, uid, v.nome, "Anexo removido pelo corretor: " + a.name, null);
+      return res.status(200).json({ok: true});
+    }
     if (b.acao === "venda_ler"){
       const s = await getDoc("vendas", S(b.id, 60));
       const eu0 = (await usuarios()).find(u => u.id === uid);
       if (!s || s.deleted_at || !participa(s, uid, [...nomesDe(eu0), prof.nome])) return res.status(404).json({message: "Venda não encontrada."});
-      return res.status(200).json({venda: s, pode_editar: !prazoVencido(s), prazo_dias: PRAZO_DIAS});
+      return res.status(200).json({venda: s, pode_editar: !prazoVencido(s), eu: uid});
     }
     if (b.acao === "clientes"){
       const r = await db(`/rest/v1/docs?select=data&collection=eq.clientes&data->>owner_id=eq.${encodeURIComponent(uid)}`);
