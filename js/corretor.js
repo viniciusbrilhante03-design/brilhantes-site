@@ -119,6 +119,20 @@ async function publicarFotos(){
   wq = wq.then(() => db.doc("publico/fotos").set({id: "fotos", itens, updated_at: nowISO()})).then(() => lastPortal.set("publico/fotos", key)).catch(() => {});
 }
 
+/* =================== GESTOR: prazo de edição do corretor (só o gestor vê) =================== */
+if (typeof openSale === "function"){
+  const _os = openSale;
+  openSale = function(id){
+    const r = _os.apply(this, arguments);
+    try { if (!isAdmin) return r; const s = st.vendas.get(id), db2 = $("#sheet .db"); if (!s || !db2 || !s.created_at || db2.querySelector("[data-prazo]")) return r;
+      const fim = new Date(Date.parse(s.created_at) + PRAZO * 864e5).toISOString().slice(0, 10), aberto = fim >= T;
+      db2.insertAdjacentHTML("afterbegin", `<div data-prazo style="font-size:12.5px;color:var(--mfg)"><span class="pill ${aberto ? "p-gold" : "p-mut"}">${aberto ? `Corretor pode editar até ${dBR(fim)}` : `Edição do corretor encerrada em ${dBR(fim)}`}</span>${s.origem === "corretor" ? ` <span class="pill p-mut">cadastrada pelo corretor</span>` : ""} <button class="btn sm" data-dupadm>Duplicar (outro lote)</button></div>`);
+      const bd = db2.querySelector("[data-dupadm]"); if (bd) bd.onclick = () => { $("#sheet").close(); openSaleForm(copiaVenda(s, "")); toast("Venda duplicada: preencha a quadra e o lote do novo lote"); };
+    } catch {}
+    return r;
+  };
+}
+
 /* =================== GESTOR: aba Duplicados =================== */
 const lev = (a, b) => { if (a === b) return 0; const m = a.length, n = b.length; if (!m || !n) return m || n; let p = Array.from({length: n + 1}, (_, j) => j); for (let i = 1; i <= m; i++){ const c = [i]; for (let j = 1; j <= n; j++) c[j] = Math.min(p[j] + 1, c[j - 1] + 1, p[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); p = c; } return p[n]; };
 const parecido = (a, b) => { const x = lotKey(a), y = lotKey(b); if (!x || !y) return false; if (x === y) return true; if ((x.match(/\d+/g) || []).join(",") !== (y.match(/\d+/g) || []).join(",")) return false; return Math.min(x.length, y.length) >= 6 && lev(x, y) <= (Math.max(x.length, y.length) >= 14 ? 2 : 1); };
@@ -212,6 +226,30 @@ if (typeof TABS !== "undefined" && typeof VIEWS !== "undefined"){
   VIEWS.duplicados = Duplicados;
 }
 
+/* =================== REGRAS DE COMISSÃO POR LOTEAMENTO =================== */
+// chave = nome do loteamento só com letras e números (minúsculas, sem acento)
+const REGRAS_COM = {
+  goldenvilleguaiuba: {base: "financed", taxa: 4, nota: "Golden Ville Guaiúba: comissão de 4% sobre o valor financiado (valor do lote − entrada)."}
+};
+const regraCom = nome => { const k = lotKey(nome || ""); if (!k) return null; if (REGRAS_COM[k]) return REGRAS_COM[k]; const hit = Object.keys(REGRAS_COM).find(x => k.startsWith(x)); return hit ? REGRAS_COM[hit] : null; };
+const moeda = v => N(v) ? N(v).toLocaleString("pt-BR", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "";
+function aplicarRegraCom(forcar){
+  if (!F || (F.id && !forcar)) return;
+  const r = regraCom(F.property_name), box = $("#sfRegra");
+  if (!r){ if (box) box.remove(); return; }
+  F.commission_base = r.base; F.commission_rate = r.taxa; F._manualComm = false;
+  if (r.base === "financed" && !N(F.financed_value) && N(F.sale_value)){ F.financed_value = +(N(F.sale_value) - N(F.entrada)).toFixed(2); F._finAuto = true; }
+  const set = (id, v) => { const el = $(id); if (el) el.value = v; };
+  set("#sf_commission_base", r.base); set("#sf_commission_rate", String(r.taxa).replace(".", ",")); set("#sf_financed_value", moeda(F.financed_value));
+  const im = $("#sf_quadra") && $("#sf_quadra").closest(".fs");
+  if (im && !box) im.insertAdjacentHTML("beforeend", `<div id="sfRegra" class="alert w" style="margin-top:8px">${esc(r.nota)}</div>`);
+  try { calc(); } catch {}
+}
+function recalcFinanciado(){
+  if (!F || !F._finAuto) return; const r = regraCom(F.property_name); if (!r || r.base !== "financed") return;
+  F.financed_value = +(N(F.sale_value) - N(F.entrada)).toFixed(2); const el = $("#sf_financed_value"); if (el) el.value = moeda(F.financed_value); try { calc(); } catch {}
+}
+
 /* =================== VENDA: cônjuge, origem e observação do cliente =================== */
 function registroCliente(nome, cpf){
   const k = norm(nome), c = onlyDigits(cpf), L = isAdmin ? [...st.clientes.values()] : (COR.clientes || []);
@@ -230,6 +268,10 @@ if (typeof openSaleForm === "function"){
       aplica(val);
       fs.insertAdjacentHTML("beforeend", blocoExtrasCliente(val));
       ligarExtras(fs.querySelector(".cx"), val, aplica);
+      const pn = $("#sf_property_name"); if (pn){ const ap = () => setTimeout(() => aplicarRegraCom(false), 0); pn.addEventListener("change", ap); pn.addEventListener("input", ap); }
+      ["#sf_sale_value", "#sf_entrada"].forEach(id => { const el = $(id); if (el) el.addEventListener("input", () => setTimeout(recalcFinanciado, 0)); });
+      const fin = $("#sf_financed_value"); if (fin) fin.addEventListener("input", () => { F._finAuto = false; });
+      setTimeout(() => aplicarRegraCom(false), 0);
       const nm = $("#sf_client_name"); if (nm) nm.addEventListener("change", () => { const rg = registroCliente(nm.value, $("#sf_client_cpf") && $("#sf_client_cpf").value); if (!rg) return; const v2 = {has_spouse: !!rg.has_spouse, spouse: rg.spouse || null, origin: rg.origin || "", notes: rg.notes || ""}; aplica(v2); const cx = fs.querySelector(".cx"); cx.outerHTML = blocoExtrasCliente(v2); ligarExtras(fs.querySelector(".cx"), v2, aplica); });
     } catch (e){ console.warn("extras cliente", e); }
     return r;
@@ -269,10 +311,23 @@ async function abrirFormVenda(init){
   canWrite = true; try { openSaleForm(base); } finally { canWrite = false; }
   const f = $("#saleForm"); if (!f) return; f.dataset.cor = "1";
   const dl = $("#dlClients"); if (dl) dl.innerHTML = meusClientes().map(c => `<option value="${esc(c.nome)}">`).join("");
-  const ai = $("#sfAI"); if (ai) ai.remove();
-  const p = f.querySelector(".dh p"); if (p) p.textContent = init ? `Você pode alterar esta venda até ${PRAZO} dias depois do cadastro. Os corretores da venda só o gestor muda.` : `Depois de salvar, você pode editar por até ${PRAZO} dias. Depois disso, só o gestor altera.`;
-  if (init){ $$("#brList input").forEach(i => i.disabled = true); const a = $("#addBr"); if (a) a.hidden = true; $$("#brList [data-rmb]").forEach(b => b.remove()); }
+  const editando = !!(init && init.id);
+  const p = f.querySelector(".dh p"); if (p) p.textContent = editando ? "Confira as alterações antes de salvar. Os corretores da venda só o gestor muda." : "Confira os dados antes de salvar.";
+  if (editando){ $$("#brList input").forEach(i => i.disabled = true); const a = $("#addBr"); if (a) a.hidden = true; $$("#brList [data-rmb]").forEach(b => b.remove()); }
   else { const first = $('#brList [data-bi="0"][data-k="name"]'); if (first){ first.readOnly = true; first.title = "Você é sempre um dos corretores da venda."; } }
+}
+// "Preencher com IA" também para o corretor: lê proposta, contrato ou print e abre o formulário já preenchido
+if (typeof openSaleAI === "function"){
+  const _osai = openSaleAI;
+  openSaleAI = function(){
+    aiFileModal({title: "Preencher venda com IA", sub: "Envie a proposta, o contrato ou um print da conversa. O formulário é preenchido para você conferir antes de salvar.", run: async file => {
+      const {data} = await aiFromFile(file, `Extraia os dados de UMA venda de lote deste arquivo (proposta, contrato ou print) e devolva SOMENTE um JSON neste formato (use "" ou 0 quando não houver):\n${SALE_JSON.replace('"entrada": 0,', '"entrada": 0, "financed_value": 0,')}\nDatas em AAAA-MM-DD. Valores em reais como número (ex.: 20405.5). sale_value é o VALOR DO LOTE (valor total da proposta). financed_value é o valor financiado/parcelado (valor do lote menos a entrada), se aparecer. commission_rate é o percentual de comissão, se houver.`, {modelTier: "default"});
+      const raw = Array.isArray(data) ? data[0] || {} : data || {}, x = normAISale(raw), fin = parseMoney(String(raw.financed_value ?? "")) || 0;
+      $("#dlg").close();
+      await (isAdmin ? (o => openSaleForm(o)) : abrirFormVenda)({property_name: x.property_name, quadra: x.quadra, lote: x.lote, client_name: x.client_name, client_phone: x.client_phone, client_email: x.client_email, client_cpf: x.client_cpf, client_birthdate: x.client_birthdate, sale_date: x.sale_date || T, sale_value: x.sale_value, financed_value: fin, commission_base: "sale", commission_rate: x.commission_rate, commission_value: x.commission_value, broker_split: 60, brokers: [{name: isAdmin ? x.broker_name : ((PORTAL && PORTAL.nome) || ""), split_pct: 100}], discounts: [], entrada: x.entrada, parcelado: false, installments: [], commission_received: false, notes: x.notes});
+      toast("Confira os dados preenchidos pela IA antes de salvar");
+    }});
+  };
 }
 if (typeof fillClient === "function"){
   const _fill = fillClient;
@@ -483,11 +538,53 @@ if (typeof bootCorretor === "function"){
     if (!v || isAdmin) return r;
     const db2 = $("#sheet .db"); if (!db2) return r;
     if (v.avulsa) return r;
-    const d = diasDesde(v.created_at), ok = podeEditar(v);
-    db2.insertAdjacentHTML("afterbegin", `<div class="toolbar" style="align-items:center">${ok ? `<button class="btn pri sm" data-editarvenda>Editar venda</button><span style="color:var(--mfg);font-size:12px">${d != null ? `Editável por mais ${Math.max(PRAZO - d, 0)} dias` : ""}</span>` : `<span class="pill p-mut">Cadastrada há mais de ${PRAZO} dias · só o gestor altera</span>`}</div>`);
+    const ok = podeEditar(v);
+    db2.insertAdjacentHTML("afterbegin", `<div class="toolbar" data-acoesv>${ok ? `<button class="btn pri sm" data-editarvenda>Editar venda</button>` : ""}<button class="btn sm" data-duplicar>Duplicar (outro lote)</button>${ok ? `<button class="btn sm danger" data-excluirv>Excluir venda</button>` : ""}</div>`);
+    db2.insertAdjacentHTML("beforeend", `<div class="fs" data-anexos><h3>Anexos</h3><p style="margin:0;color:var(--mfg)">Carregando…</p></div>`);
+    const ler = () => corAPI({acao: "venda_ler", id: v.id});
     const b = db2.querySelector("[data-editarvenda]");
-    if (b) b.onclick = async () => { b.disabled = true; b.textContent = "Abrindo…"; try { const j = await corAPI({acao: "venda_ler", id: v.id}); if (!j.pode_editar){ toast(`Cadastrada há mais de ${PRAZO} dias. Só o gestor altera.`); return; } $("#sheet").close(); abrirFormVenda(j.venda); } catch (e){ toast(e.message); } finally { b.disabled = false; b.textContent = "Editar venda"; } };
+    if (b) b.onclick = async () => { b.disabled = true; b.textContent = "Abrindo…"; try { const j = await ler(); if (!j.pode_editar){ toast("Esta venda não pode mais ser editada. Fale com o gestor."); return; } $("#sheet").close(); abrirFormVenda(j.venda); } catch (e){ toast(e.message); } finally { b.disabled = false; b.textContent = "Editar venda"; } };
+    const du = db2.querySelector("[data-duplicar]");
+    du.onclick = async () => { du.disabled = true; try { const j = await ler(); $("#sheet").close(); await abrirFormVenda(copiaVenda(j.venda, (PORTAL && PORTAL.nome) || "")); toast("Venda duplicada: preencha a quadra e o lote do novo lote"); setTimeout(() => { const q = $("#sf_quadra"); if (q) q.focus(); }, 300); } catch (e){ toast(e.message); } finally { du.disabled = false; } };
+    const ex = db2.querySelector("[data-excluirv]");
+    if (ex) ex.onclick = async () => { if (!ex.dataset.ok){ ex.dataset.ok = "1"; ex.textContent = "Confirmar exclusão"; return; } ex.disabled = true; try { await corAPI({acao: "venda_excluir", id: v.id}); if (PORTAL) PORTAL.vendas = (PORTAL.vendas || []).filter(x => x.id !== v.id); $("#sheet").close(); toast("Venda excluída. O gestor foi avisado."); renderCorretor(); } catch (e){ ex.disabled = false; toast(e.message); } };
+    ler().then(j => pintarAnexos(db2.querySelector("[data-anexos]"), j.venda, j.eu)).catch(() => { const a = db2.querySelector("[data-anexos] p"); if (a) a.textContent = "Não foi possível carregar os anexos."; });
     return r;
   };
+}
+function copiaVenda(s, eu){
+  const c = {}; for (const k of ["property_name", "client_name", "client_phone", "client_email", "client_cpf", "client_birthdate", "client_has_spouse", "client_spouse", "client_origin", "client_notes", "sale_date", "sale_value", "financed_value", "entrada", "commission_base", "commission_rate", "commission_value", "broker_split", "discounts", "notes"]) c[k] = structuredClone(s[k] ?? (k === "discounts" ? [] : ""));
+  const bs = (s.brokers && s.brokers.length ? s.brokers : [{name: eu || s.broker_name, split_pct: 100}]).map(b => ({name: b.name, split_pct: N(b.split_pct)}));
+  return {...c, quadra: "", lote: "", brokers: isAdmin ? bs : (bs.some(b => norm(b.name) === norm(eu)) ? bs : [{name: eu, split_pct: 100}]), parcelado: !!(s.installments || []).length, installments: (s.installments || []).map(i => ({number: i.number, due_date: i.due_date, value: i.value, received: false, received_date: null})), commission_received: false};
+}
+const KIND_ANEXO = {contrato: "Contrato", proposta: "Proposta", comprovante: "Comprovante", documento: "Documento do cliente", outro: "Outro"};
+function pintarAnexos(box, s, eu){
+  if (!box) return; const L = (s.attachments || []).filter(a => !a.deleted_at);
+  box.innerHTML = `<h3>Anexos (${L.length})</h3>${L.map(a => `<div class="inst" style="grid-template-columns:minmax(0,1fr) auto"><div><b>${esc(a.name)}</b><span class="s" style="display:block;color:var(--mfg);font-size:12px">${esc(KIND_ANEXO[a.kind] || "Arquivo")} · ${dBR(a.at)}${a.by ? " · " + esc(a.by) : ""}</span></div><span class="toolbar"><a class="btn sm" href="/_blob/${esc(a.asset_id)}" target="_blank" rel="noopener">Abrir</a>${a.by_id && a.by_id === eu ? `<button class="btn sm danger" data-rmanexo="${esc(a.id)}">Remover</button>` : ""}</span></div>`).join("") || `<p style="margin:0;color:var(--mfg)">Nenhum anexo ainda.</p>`}
+    <div class="toolbar" style="margin-top:6px"><select data-anexokind aria-label="Tipo de anexo">${Object.entries(KIND_ANEXO).map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select><label class="btn sm pri">Anexar arquivo<input type="file" data-anexofile accept="application/pdf,image/*,.xlsx,.xls,.csv,.txt,.doc,.docx" hidden></label><span data-anexomsg style="color:var(--mfg);font-size:12px">PDF, foto ou planilha</span></div>`;
+  box.querySelector("[data-anexofile]").onchange = async e => { const f = e.target.files[0]; if (!f) return; const msg = box.querySelector("[data-anexomsg]");
+    try { msg.textContent = "Enviando…"; await enviarAnexo(s.id, f, box.querySelector("[data-anexokind]").value); toast("Arquivo anexado. O gestor foi avisado."); const j = await corAPI({acao: "venda_ler", id: s.id}); pintarAnexos(box, j.venda, j.eu); }
+    catch (err){ msg.textContent = err.message; } };
+  box.querySelectorAll("[data-rmanexo]").forEach(b => b.onclick = async () => { if (!b.dataset.ok){ b.dataset.ok = "1"; b.textContent = "Confirmar"; return; } try { await corAPI({acao: "anexo_rm", id: s.id, anexo: b.dataset.rmanexo}); const j = await corAPI({acao: "venda_ler", id: s.id}); pintarAnexos(box, j.venda, j.eu); } catch (e){ toast(e.message); } });
+}
+async function reduzirImagem(file){
+  if (!/^image\/(jpeg|png|webp|heic)/i.test(file.type) || file.size < 1.5e6) return file;
+  try { const bmp = await createImageBitmap(file), z = Math.min(1, 2000 / Math.max(bmp.width, bmp.height)), c = document.createElement("canvas"); c.width = Math.round(bmp.width * z); c.height = Math.round(bmp.height * z); c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise(ok => c.toBlob(ok, "image/jpeg", .82)); return blob && blob.size < file.size ? new File([blob], file.name.replace(/\.\w+$/, "") + ".jpg", {type: "image/jpeg"}) : file; } catch { return file; }
+}
+async function enviarAnexo(id, file, kind){
+  file = await reduzirImagem(file);
+  const ext = (file.name.split(".").pop() || "").toLowerCase(), type = file.type || ({pdf: "application/pdf", csv: "text/csv", txt: "text/plain"})[ext] || "application/octet-stream";
+  try {
+    const u = await corAPI({acao: "anexo_url", id});
+    const r = await fetch(u.upload_url, {method: "PUT", headers: {"Content-Type": type, "x-upsert": "false"}, body: file});
+    if (!r.ok) throw Object.assign(new Error("upload " + r.status), {via: true});
+    await corAPI({acao: "anexo_ok", id, asset_id: u.asset_id, nome: file.name, kind, content_type: type, size: file.size});
+  } catch (e){
+    if (!(e.via || e.status === 502 || e.status === 0 || /upload/.test(e.message))) throw e;
+    if (file.size > 3.2e6) throw new Error("Não consegui enviar este arquivo grande agora. Tente um arquivo de até 3 MB ou peça ao gestor para anexar.");
+    const b64 = await new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(",")[1] || ""); fr.onerror = () => no(new Error("Não foi possível ler o arquivo.")); fr.readAsDataURL(file); });
+    await corAPI({acao: "anexo_b64", id, nome: file.name, kind, content_type: type, b64});
+  }
 }
 })();
