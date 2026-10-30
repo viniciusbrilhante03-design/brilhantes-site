@@ -123,6 +123,70 @@ async function publicarFotos(){
   wq = wq.then(() => db.doc("publico/fotos").set({id: "fotos", itens, updated_at: nowISO()})).then(() => lastPortal.set("publico/fotos", key)).catch(() => {});
 }
 
+/* =================== COPYS: ordem Geral → Infraestrutura → Localização → Valores, e reordenar (gestor) =================== */
+const ORDEM_COPY = ["Geral", "Infraestrutura", "Localização", "Valores"];
+if (typeof COPYCAT !== "undefined"){ const extra = COPYCAT.filter(c => !ORDEM_COPY.includes(c)); COPYCAT.splice(0, COPYCAT.length, ...ORDEM_COPY, ...extra); }
+function copiasOrdenadas(l){
+  const L = (l && l.copies) || []; if (l && l.copies_manual) return L.slice();
+  const pos = c => { const i = COPYCAT.indexOf(c.category); return i < 0 ? 99 : i; };
+  return L.map((c, i) => [c, i]).sort((a, b) => pos(a[0]) - pos(b[0]) || a[1] - b[1]).map(x => x[0]);
+}
+if (typeof LOTTAB !== "undefined" && LOTTAB.copys){
+  const _h = LOTTAB.copys, _b = LOTBIND.copys;
+  LOTTAB.copys = function(l){ return _h.call(this, {...l, copies: copiasOrdenadas(l)}); };
+  LOTBIND.copys = function(l){
+    const r = _b ? _b.apply(this, arguments) : undefined;
+    if (!canWrite) return r;
+    const body = $("#ltBody"); if (!body) return r;
+    const cards = [...body.querySelectorAll(".card")].filter(c => c.querySelector('[data-act="editcopy"]'));
+    cards.forEach((card, k) => {
+      const id = card.querySelector('[data-act="editcopy"]').dataset.id; card.dataset.cpid = id; card.draggable = true; card.style.cursor = "grab";
+      const tb = card.querySelector(".toolbar");
+      if (tb) tb.insertAdjacentHTML("afterbegin", `<button type="button" class="btn sm" data-cpmv="-1" title="Subir" aria-label="Subir" ${k === 0 ? "disabled" : ""}>▲</button><button type="button" class="btn sm" data-cpmv="1" title="Descer" aria-label="Descer" ${k === cards.length - 1 ? "disabled" : ""}>▼</button>`);
+    });
+    if (cards.length > 1){ const seg = $("#cpF"); if (seg && !body.querySelector("[data-cphint]")) seg.insertAdjacentHTML("afterend", `<p data-cphint style="margin:0;color:var(--mfg);font-size:12px">Arraste as copys ou use ▲▼ para mudar a ordem. ${l.copies_manual ? `<button type="button" class="btn sm" data-cpreset>Voltar à ordem padrão (Geral, Infraestrutura, Localização, Valores)</button>` : "Ordem padrão: Geral, Infraestrutura, Localização, Valores."}</p>`); }
+    const salvar = ordem => { const d = st.loteamentos.get(l.id); saveDoc("loteamentos", {...d, copies: ordem, copies_manual: true}); renderLot(); };
+    const mover = (id, alvoId) => { const full = copiasOrdenadas(st.loteamentos.get(l.id)), i = full.findIndex(c => c.id === id), j = full.findIndex(c => c.id === alvoId); if (i < 0 || j < 0 || i === j) return; const [x] = full.splice(i, 1); full.splice(j, 0, x); salvar(full); };
+    body.addEventListener("click", e => {
+      const mv = e.target.closest("[data-cpmv]"); if (mv){ const card = mv.closest("[data-cpid]"), k = cards.indexOf(card), viz = cards[k + +mv.dataset.cpmv]; if (viz) mover(card.dataset.cpid, viz.dataset.cpid); return; }
+      if (e.target.closest("[data-cpreset]")){ const d = st.loteamentos.get(l.id); const n = {...d}; delete n.copies_manual; n.copies = copiasOrdenadas(n); saveDoc("loteamentos", n); renderLot(); }
+    });
+    let arr = null;
+    cards.forEach(card => {
+      card.addEventListener("dragstart", e => { arr = card.dataset.cpid; card.style.opacity = ".5"; try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", arr); } catch {} });
+      card.addEventListener("dragend", () => { card.style.opacity = ""; });
+      card.addEventListener("dragover", e => { if (arr && arr !== card.dataset.cpid){ e.preventDefault(); card.style.outline = "2px dashed var(--gold)"; } });
+      card.addEventListener("dragleave", () => { card.style.outline = ""; });
+      card.addEventListener("drop", e => { e.preventDefault(); card.style.outline = ""; if (arr) mover(arr, card.dataset.cpid); arr = null; });
+    });
+    return r;
+  };
+}
+// corretor recebe as copys já na ordem certa
+if (typeof slimLots === "function"){
+  const _slim = slimLots;
+  slimLots = function(){ return _slim.apply(this, arguments).map(x => { const l = st.loteamentos.get(x.id); return l ? {...x, copies: copiasOrdenadas(l)} : x; }); };
+}
+// corretor: na ficha do loteamento, primeiro as informações; as fotos vêm depois (ou pelo botão "Fotos")
+if (typeof openLotC === "function"){
+  const _olc = openLotC;
+  openLotC = function(l){
+    const r = _olc.apply(this, arguments);
+    try {
+      if (!l) return r; const db2 = $("#sheet .db"); if (!db2) return r;
+      const grid = [...db2.children].find(x => x.tagName === "DIV" && /grid-template-columns/.test(x.getAttribute("style") || "") && x.querySelector("img"));
+      if (!grid) return r;
+      const n = grid.querySelectorAll("img").length;
+      const bloco = document.createElement("div"); bloco.className = "fs"; bloco.id = "lotFotos"; bloco.innerHTML = `<h3>Fotos (${n})</h3>`; bloco.appendChild(grid);
+      const ancora = [...db2.children].find(x => x.classList.contains("fs") && /Documentos|Vídeos|Copys|Pergunte/.test((x.querySelector("h3") || {}).textContent || ""));
+      if (ancora) db2.insertBefore(bloco, ancora); else db2.appendChild(bloco);
+      db2.insertAdjacentHTML("afterbegin", `<div class="toolbar"><button type="button" class="btn sm" data-irfotos>📷 Ver fotos (${n})</button></div>`);
+      db2.querySelector("[data-irfotos]").onclick = () => bloco.scrollIntoView({behavior: "smooth", block: "start"});
+    } catch (e){ console.warn("ficha", e); }
+    return r;
+  };
+}
+
 /* =================== GESTOR: prazo de edição do corretor (só o gestor vê) =================== */
 if (typeof openSale === "function"){
   const _os = openSale;
