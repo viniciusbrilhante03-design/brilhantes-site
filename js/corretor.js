@@ -32,9 +32,10 @@ dialog[open]{display:block}
 .gm-style button.gm-ui-hover-effect{opacity:1!important;width:36px!important;height:36px!important;margin:4px!important;background:#1a4636!important;border-radius:50%!important;box-shadow:0 2px 6px rgba(0,0,0,.35)!important;display:grid!important;place-items:center!important}
 .gm-style button.gm-ui-hover-effect>span{background-color:#fff!important;width:18px!important;height:18px!important;margin:0!important}
 .gm-style button.gm-ui-hover-effect img{filter:invert(1) brightness(2)!important;width:18px!important;height:18px!important;margin:0!important}
-@media (max-width:760px){
-  dialog#dlg{position:fixed;inset:0;margin:0;width:100vw;max-width:100vw;height:100vh;height:100dvh;max-height:none;border-radius:0}
-  dialog#dlg>.dlg,dialog#dlg>form.dlg{height:100%;max-height:100%}
+.vh-file{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;overflow:hidden!important;clip:rect(0 0 0 0)!important;pointer-events:none!important}
+@media (max-width:760px), (pointer:coarse) and (max-width:1366px){
+  dialog#dlg{position:fixed;inset:0;margin:0;width:100vw!important;max-width:100vw!important;height:100vh;height:100dvh;max-height:none;border-radius:0}
+  dialog#dlg>.dlg,dialog#dlg>form.dlg{height:100%;max-height:100%;max-width:none!important;width:100%}
   dialog#dlg>.dlg>.db{-webkit-overflow-scrolling:touch;min-height:0}
 }`; document.head.appendChild(st2); })();
 const ORIGEM = [["acao", "🎯 Ação"], ["lead", "📣 Lead anúncio"], ["carteira", "📋 Carteira"], ["stand", "🏢 Stand"], ["indicacao", "🤝 Indicação"], ["outro", "✏️ Outro"]];
@@ -62,6 +63,9 @@ function avatarDupla(li, membros, foto){
   li.classList.add("duo"); av.classList.add("duo");
   av.innerHTML = membros.slice(0, 2).map(n => { const f = foto(n); return `<i>${f ? `<img alt="" src="${esc(f)}">` : esc(iniciais(n))}</i>`; }).join("");
 }
+// iPhone/iPad: campo de arquivo com "hidden" às vezes não abre o seletor; troca por um campo invisível mas presente
+function arrumarArquivos(root){ (root || document).querySelectorAll('input[type="file"][hidden]').forEach(i => { i.hidden = false; i.classList.add("vh-file"); const lb = i.closest("label"); if (lb && getComputedStyle(lb).position === "static") lb.style.position = "relative"; }); }
+let _faT = 0; new MutationObserver(() => { cancelAnimationFrame(_faT); _faT = requestAnimationFrame(() => arrumarArquivos()); }).observe(document.documentElement, {childList: true, subtree: true});
 // gestor: duas fotos nas duplas do ranking do Painel (e de qualquer lista de ranking)
 let _rkT = 0;
 new MutationObserver(() => { cancelAnimationFrame(_rkT); _rkT = requestAnimationFrame(() => {
@@ -176,13 +180,47 @@ if (typeof openLotC === "function"){
       if (!l) return r; const db2 = $("#sheet .db"); if (!db2) return r;
       const grid = [...db2.children].find(x => x.tagName === "DIV" && /grid-template-columns/.test(x.getAttribute("style") || "") && x.querySelector("img"));
       if (!grid) return r;
-      const n = grid.querySelectorAll("img").length;
-      const bloco = document.createElement("div"); bloco.className = "fs"; bloco.id = "lotFotos"; bloco.innerHTML = `<h3>Fotos (${n})</h3>`; bloco.appendChild(grid);
+      const med = (l.media || []), fotos = med.filter(m => ["foto", "arte"].includes(m.kind)), plantas = med.filter(m => m.kind === "planta"), n = fotos.length;
+      const cel = m => /pdf/i.test(m.content_type || "") ? `<a class="btn sm" href="${esc(blobUrl(m))}" target="_blank" rel="noopener" style="justify-content:flex-start">📄 ${esc(m.title || m.caption || "Planta (PDF)")}</a>` : `<a href="${esc(blobUrl(m))}" target="_blank" rel="noopener"><img src="${esc(blobUrl(m))}" alt="" loading="lazy" style="aspect-ratio:4/3;width:100%;object-fit:cover;border-radius:8px"></a>`;
+      const g = arr => `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">${arr.map(cel).join("")}</div>`;
+      grid.remove();
+      const bloco = document.createElement("div"); bloco.className = "fs"; bloco.id = "lotFotos"; bloco.innerHTML = `<h3>Fotos (${n})</h3>${n ? g(fotos) : `<p style="margin:0;color:var(--mfg)">Sem fotos.</p>`}${plantas.length ? `<h3 style="margin-top:14px">Plantas (${plantas.length})</h3>${g(plantas)}` : ""}`;
       const ancora = [...db2.children].find(x => x.classList.contains("fs") && /Documentos|Vídeos|Copys|Pergunte/.test((x.querySelector("h3") || {}).textContent || ""));
       if (ancora) db2.insertBefore(bloco, ancora); else db2.appendChild(bloco);
-      db2.insertAdjacentHTML("afterbegin", `<div class="toolbar"><button type="button" class="btn sm" data-irfotos>📷 Ver fotos (${n})</button></div>`);
+      db2.insertAdjacentHTML("afterbegin", `<div class="toolbar"><button type="button" class="btn sm" data-irfotos>📷 Ver fotos (${n})${plantas.length ? " e plantas" : ""}</button></div>`);
       db2.querySelector("[data-irfotos]").onclick = () => bloco.scrollIntoView({behavior: "smooth", block: "start"});
     } catch (e){ console.warn("ficha", e); }
+    return r;
+  };
+}
+
+/* =================== FICHA (gestor): Fotos e Plantas separadas =================== */
+if (typeof LOTBIND !== "undefined"){
+  const _mb = LOTBIND.midia;
+  LOTBIND.midia = function(l){
+    const r = _mb ? _mb.apply(this, arguments) : undefined;
+    try {
+      const body = $("#ltBody"); const fs = body && [...body.querySelectorAll(".fs")].find(x => /^Fotos e plantas/i.test(((x.querySelector("h3") || {}).textContent || "").trim())); if (!fs) return r;
+      const grid = fs.querySelector("div[style*='grid-template-columns']"), figs = grid ? [...grid.querySelectorAll("figure")] : [];
+      const plantas = figs.filter(f => [...f.querySelectorAll(".pill")].some(p => /planta/i.test(p.textContent)));
+      fs.querySelector("h3").textContent = `Fotos (${figs.length - plantas.length})`;
+      const box = document.createElement("div"); box.className = "fs"; box.innerHTML = `<h3>Plantas (${plantas.length})</h3>`;
+      if (plantas.length){ const g2 = grid.cloneNode(false); plantas.forEach(f => g2.appendChild(f)); box.appendChild(g2); } else box.insertAdjacentHTML("beforeend", `<p style="margin:0;color:var(--mfg)">Nenhuma planta ainda. Use “+ Planta” (imagem ou PDF).</p>`);
+      if (grid && !grid.children.length) grid.outerHTML = `<p style="margin:0;color:var(--mfg)">Nenhuma foto ainda.</p>`;
+      fs.after(box);
+    } catch (e){ console.warn("plantas", e); }
+    return r;
+  };
+}
+
+/* =================== LOTEAMENTOS: prioridade (Organizar) com botão "Topo" =================== */
+if (typeof Loteamentos !== "undefined" && typeof saveOrder === "function"){
+  const _lu = Loteamentos.update;
+  Loteamentos.update = function(){
+    const r = _lu.apply(this, arguments);
+    if (ui.lMode !== "ordem") return r;
+    $$("#ordList li").forEach((li, i) => { if (li.querySelector("[data-topo]")) return; const ref = li.querySelector("[data-mv]"); const btn = `<button type="button" class="btn sm" data-topo title="Mover para o topo" ${i === 0 ? "disabled" : ""}>⤒ Topo</button>`; if (ref) ref.insertAdjacentHTML("beforebegin", btn); else li.insertAdjacentHTML("beforeend", btn); });
+    const ol = $("#ordList"); if (ol && !ol.dataset.topo){ ol.dataset.topo = "1"; ol.addEventListener("click", e => { const b = e.target.closest("[data-topo]"); if (!b) return; e.stopPropagation(); const id = b.closest("li").dataset.oid, ids = lotList().map(l => l.id).filter(x => x !== id); saveOrder([id, ...ids]); toast("Movido para o topo"); }, true); }
     return r;
   };
 }
